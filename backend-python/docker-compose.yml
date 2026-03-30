@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: tradeuser
+      POSTGRES_PASSWORD: tradepassword
+      POSTGRES_DB: tradedb
+    ports:
+      - "5433:5432" # Host:5433 to avoid local conflicts
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradeuser -d tradedb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://tradeuser:tradepassword@db/tradedb
+      - ENV=development
+      - APP_PORT=8000
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
