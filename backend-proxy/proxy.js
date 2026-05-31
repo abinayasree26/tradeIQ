@@ -280,15 +280,18 @@ const server = http.createServer((req, res) => {
     req.on('end', async () => {
       try {
         const { question, history = [], databricksData = {} } = JSON.parse(body);
-        const currentSym = databricksData.symbol || 'NIFTY 50';
-        const systemPrompt = `You are TradeIQ AI, a professional stock market analyst. 
-Currently, you are analyzing ${currentSym}. 
-- For Nifty 50, you have access to extensive historical 2024 data (Databricks). 
-- For other stocks, prioritize realtime API data if present in context. 
-Answer concisely in 2-3 sentences max. Use Indian number system (e.g. 22,500). 
-Always refer to index moves in "points" and stocks in "rupees". 
-Be insightful, professional, and data-driven. Never make up data.`;
+        console.log(`[AI Chat] Request: "${question.substring(0, 50)}..."`);
 
+        if (!ANTHROPIC_KEY || ANTHROPIC_KEY.includes('YOUR_ANTHROPIC_KEY')) {
+          console.warn('[AI Chat] Warning: ANTHROPIC_KEY is not set or is a placeholder.');
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.write(`data: ${JSON.stringify({ error: 'Anthropic API Key is missing. Please set ANTHROPIC_KEY in .env file.' })}\n\n`);
+          res.write('data: [DONE]\n\n');
+          res.end();
+          return;
+        }
+
+        const currentSym = databricksData.symbol || 'NIFTY 50';
         const contextMsg = `Current Databricks data context:\n${JSON.stringify(databricksData, null, 2)}\n\nUser question: ${question}`;
 
         const recentHistory = history.slice(-6).map(m => ({
@@ -299,12 +302,9 @@ Be insightful, professional, and data-driven. Never make up data.`;
         const messages = [...recentHistory, { role: 'user', content: contextMsg }];
 
         const payload = JSON.stringify({
-          model: 'claude-3-5-sonnet-20240620', // Using current Sonnet model
+          model: 'claude-3-5-sonnet-20240620',
           max_tokens: 1024,
-          system: `You are StockIQ, an expert Nifty 50 market analyst AI. You have access to 2024 Nifty 50 historical data provided as JSON context. 
-Answer questions concisely in 2–3 sentences. Format numbers with Indian number system (lakhs/crores). 
-When mentioning prices, always say 'points' not 'rupees'. 
-If asked for SQL, generate it. Never make up data not in the context.`,
+          system: `You are StockIQ, an expert Nifty 50 market analyst AI. Answer concisely.`,
           messages,
           stream: true
         });
@@ -328,11 +328,25 @@ If asked for SQL, generate it. Never make up data not in the context.`,
         };
 
         const claudeReq = https.request(opts, (claudeRes) => {
+          console.log(`[AI Chat] Anthropic Response Status: ${claudeRes.statusCode}`);
+          
+          if (claudeRes.statusCode !== 200) {
+            let errBuf = '';
+            claudeRes.on('data', d => { errBuf += d; });
+            claudeRes.on('end', () => {
+              console.error(`[AI Chat] Anthropic Error: ${errBuf}`);
+              res.write(`data: ${JSON.stringify({ error: `Anthropic API Error (${claudeRes.statusCode})` })}\n\n`);
+              res.write('data: [DONE]\n\n');
+              res.end();
+            });
+            return;
+          }
+
           let buf = '';
           claudeRes.on('data', chunk => {
             buf += chunk.toString();
             const lines = buf.split('\n');
-            buf = lines.pop(); // keep incomplete last line
+            buf = lines.pop(); 
             for (const line of lines) {
               if (line.startsWith('data: ')) {
                 const data = line.slice(6).trim();
@@ -346,11 +360,16 @@ If asked for SQL, generate it. Never make up data not in the context.`,
                     res.write('data: [DONE]\n\n');
                     res.end();
                   }
-                } catch (_) { /* skip malformed */ }
+                } catch (_) { }
               }
             }
           });
-          claudeRes.on('end', () => { res.write('data: [DONE]\n\n'); res.end(); });
+          claudeRes.on('end', () => { 
+            if (!res.writableEnded) {
+              res.write('data: [DONE]\n\n'); 
+              res.end(); 
+            }
+          });
         });
 
         claudeReq.on('error', (e) => {

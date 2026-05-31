@@ -14,8 +14,10 @@ import NewsPanel from './components/NewsPanel';
 import AiChat from './components/AiChat';
 import CandlestickChart from './components/CandlestickChart';
 import MarketTickerBar from './components/MarketTickerBar';
-import { CONFIG } from './config';
+import { CONFIG, INDIA_SYMBOLS } from './config';
 import { useThresholdAlerts } from './services/useThresholdAlerts';
+import IndicatorPanel from './components/IndicatorPanel';
+import MilestoneAlerts from './components/MilestoneAlerts';
 
 const LOADING_STATE = {
   kpi: { avg_open: null, avg_close: null, avg_day_range: null },
@@ -88,16 +90,7 @@ function App() {
     setActiveTab('dashboard');
   };
 
-  const STOCKS = [
-    { symbol: 'NIFTY 50', name: 'NSE Index' },
-    { symbol: 'BANKNIFTY', name: 'NSE Bank Index' },
-    { symbol: 'RELIANCE', name: 'Reliance Industries' },
-    { symbol: 'TCS', name: 'Tata Consultancy Services' },
-    { symbol: 'INFY', name: 'Infosys Ltd' },
-    { symbol: 'TATAMOTORS', name: 'Tata Motors' },
-    { symbol: 'HDFCBANK', name: 'HDFC Bank Ltd' },
-    { symbol: 'SBIN', name: 'State Bank of India' }
-  ];
+  const STOCKS = INDIA_SYMBOLS.map(s => ({ symbol: s.symbol, name: s.name }));
 
   const toggleTheme = () => {
     setTheme(prev => prev === 'dark' ? 'light' : 'dark');
@@ -547,6 +540,34 @@ function App() {
     </div>
   );
 
+  const renderSignals = () => (
+    <div className="dashboard-content">
+      <div className="welcome">
+        <div>
+          <h1>Technical Signals</h1>
+          <p>RSI · MACD · Bollinger Bands · RVOL · EMA · ATR · VWAP · Composite Score</p>
+        </div>
+      </div>
+      <div style={{ maxWidth: 640, margin: '0 auto' }}>
+        <IndicatorPanel symbol={selectedSymbol} />
+      </div>
+    </div>
+  );
+
+  const renderAlerts = () => (
+    <div className="dashboard-content">
+      <div className="welcome">
+        <div>
+          <h1>Milestone Alerts</h1>
+          <p>Progressive alerts with plain-language coaching · Stop-loss · Targets · Telegram delivery</p>
+        </div>
+      </div>
+      <div style={{ maxWidth: 700, margin: '0 auto' }}>
+        <MilestoneAlerts symbol={selectedSymbol} />
+      </div>
+    </div>
+  );
+
   return (
     <div className="main-layout" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       <MarketTickerBar symbol={selectedSymbol} livePrice={livePrice} />
@@ -571,6 +592,12 @@ function App() {
           </button>
           <button className={`nav-item ${activeTab === 'historical' ? 'active' : ''}`} onClick={() => setActiveTab('historical')}>
             <Target size={18} /> <span>Aggregations</span>
+          </button>
+          <button className={`nav-item ${activeTab === 'signals' ? 'active' : ''}`} onClick={() => setActiveTab('signals')}>
+            <Activity size={18} /> <span>Signals</span>
+          </button>
+          <button className={`nav-item ${activeTab === 'alerts' ? 'active' : ''}`} onClick={() => setActiveTab('alerts')}>
+            <Bell size={18} /> <span>Alerts</span>
           </button>
           <button className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
             <Settings size={18} /> <span>Settings</span>
@@ -682,6 +709,8 @@ function App() {
             {activeTab === 'data' && renderMarketData()}
             {activeTab === 'news' && renderNewsTab()}
             {activeTab === 'historical' && renderHistorical()}
+            {activeTab === 'signals' && renderSignals()}
+            {activeTab === 'alerts' && renderAlerts()}
             {activeTab === 'settings' && renderSettings()}
           </div>
         </main>

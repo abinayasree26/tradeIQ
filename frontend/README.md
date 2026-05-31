@@ -147,9 +147,15 @@ node server/proxy.js
 ```
 
 ### 4. Start the Frontend
+Open a second terminal and run:
 ```bash
 npm run dev
 # Runs on http://localhost:5173
+```
+
+### 6. Start both together
+```bash
+npm start
 ```
 
 ---

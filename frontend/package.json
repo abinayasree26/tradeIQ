@@ -9,7 +9,7 @@
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "proxy": "node server/proxy.js",
-    "start": "npm run proxy & npm run dev"
+    "start": "node server/start.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

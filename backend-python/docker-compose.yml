@@ -1,21 +1,35 @@
 version: '3.8'
 
+# ============================================================
+# STAP — Docker Compose
+#
+# OPTION A (default): Use Proxmox LXC container for PostgreSQL
+#   → Set DATABASE_URL in .env to point to your Proxmox container
+#   → Only start the 'api' service: docker-compose up api
+#
+# OPTION B: Use local Docker PostgreSQL (dev / fallback)
+#   → Uncomment the 'db' service below
+#   → docker-compose up  (starts both db + api)
+# ============================================================
+
 services:
-  db:
-    image: postgres:15
-    environment:
-      POSTGRES_USER: tradeuser
-      POSTGRES_PASSWORD: tradepassword
-      POSTGRES_DB: tradedb
-    ports:
-      - "5433:5432" # Host:5433 to avoid local conflicts
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tradeuser -d tradedb"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+
+  # ── OPTION B: Local PostgreSQL (uncomment if not using Proxmox) ──
+  # db:
+  #   image: postgres:15
+  #   environment:
+  #     POSTGRES_USER: stap_user
+  #     POSTGRES_PASSWORD: Stap@2026!Secure
+  #     POSTGRES_DB: stap_db
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U stap_user -d stap_db"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
 
   api:
     build: .
@@ -24,12 +38,15 @@ services:
     env_file:
       - .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://tradeuser:tradepassword@db/tradedb
+      # Proxmox PostgreSQL — update IP in .env
+      - DATABASE_URL=${DATABASE_URL}
       - ENV=development
       - APP_PORT=8000
-    depends_on:
-      db:
-        condition: service_healthy
+    # Uncomment if using local Docker DB:
+    # depends_on:
+    #   db:
+    #     condition: service_healthy
+    restart: unless-stopped
 
-volumes:
-  postgres_data:
+# volumes:
+#   postgres_data:
