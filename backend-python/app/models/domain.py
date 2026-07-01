@@ -118,6 +118,42 @@ class IndicatorSnapshot(Base):
     )
 
 
+# ─── STAP Phase 4: Sentiment snapshots ────────────────────────────────────────
+
+class SentimentSnapshot(Base):
+    """Cached sentiment analysis results per symbol."""
+    __tablename__ = "sentiment_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), index=True, nullable=False)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Combined sentiment
+    combined_score = Column(Float)          # -100 to +100
+    combined_label = Column(String(30))     # bullish / bearish / neutral / slightly_*
+
+    # News sentiment (FinBERT)
+    news_score = Column(Float)
+    news_label = Column(String(30))
+    news_positive_pct = Column(Float)
+    news_negative_pct = Column(Float)
+    news_count = Column(Integer)
+
+    # Reddit sentiment
+    reddit_score = Column(Float)
+    reddit_label = Column(String(30))
+    reddit_count = Column(Integer)
+
+    # Candlestick patterns
+    pattern_score = Column(Float)           # -100 to +100
+    pattern_signal = Column(String(20))     # bullish / bearish / neutral
+    patterns_detected = Column(JSON)        # [{name, signal, strength}]
+
+    __table_args__ = (
+        Index("idx_sentiment_symbol_ts", "symbol", "timestamp"),
+    )
+
+
 # ─── STAP: Alert rules with milestone chains ─────────────────────────────────
 
 class AlertRule(Base):
@@ -195,3 +231,41 @@ class StopLossRecord(Base):
     target_2 = Column(Float)
     risk_reward = Column(Float)
     atr_14 = Column(Float)
+
+
+# ─── STAP Phase 5: User Authentication ───────────────────────────────────────
+
+class User(Base):
+    """User accounts with subscription tiers and authentication."""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    password_hash = Column(String(255), nullable=False)
+    name = Column(String(100), nullable=False)
+
+    # Subscription
+    subscription_tier = Column(String(30), default="free")  # free / pro / pro_annual / enterprise
+    subscription_expires = Column(DateTime(timezone=True))
+    stripe_customer_id = Column(String(100))
+    stripe_subscription_id = Column(String(100))
+
+    # API access
+    api_key = Column(String(100), unique=True, index=True)
+
+    # Preferences
+    telegram_chat_id = Column(String(50))
+    default_symbols = Column(JSON, default=list)  # user's watchlist
+    notification_prefs = Column(JSON, default=dict)
+
+    # Account state
+    is_active = Column(Boolean, default=True)
+    is_verified = Column(Boolean, default=False)
+    last_login = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("idx_user_email", "email"),
+        Index("idx_user_api_key", "api_key"),
+    )

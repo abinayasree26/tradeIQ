@@ -1,4 +1,5 @@
 import httpx
+from datetime import datetime, timedelta
 from tenacity import retry, wait_exponential, stop_after_attempt
 from app.core.config import settings
 from app.utils.logger import logger
@@ -19,11 +20,13 @@ class FinnhubClient:
             return data
 
     async def get_news(self, symbol: str):
+        today = datetime.now().strftime("%Y-%m-%d")
+        week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
         async with httpx.AsyncClient() as client:
             r = await client.get(f"{self.base_url}/company-news", params={
                 "symbol": symbol.upper(), 
-                "from": "2024-01-01", 
-                "to": "2024-12-31", # Simplified for demo; should be dynamic
+                "from": week_ago, 
+                "to": today,
                 "token": self.api_key
             })
             r.raise_for_status()

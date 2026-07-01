@@ -39,6 +39,24 @@ class Settings(BaseSettings):
     # Powers the AI chat panel in the frontend. Paid API.
     ANTHROPIC_KEY: str = ""
 
+    # ── JWT Authentication ─────────────────────────────────────────────────────
+    # Secret key for signing JWT tokens. MUST be changed in production.
+    # Generate with: python -c "import secrets; print(secrets.token_urlsafe(64))"
+    JWT_SECRET_KEY: str = "CHANGE-ME-in-production-use-secrets-token-urlsafe-64"
+    JWT_ALGORITHM: str = "HS256"
+
+    # ── Stripe Billing ─────────────────────────────────────────────────────────
+    # Leave empty for demo mode (upgrades work without payment).
+    # Get keys at: dashboard.stripe.com/apikeys
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_PRICE_PRO_MONTHLY: str = ""
+    STRIPE_PRICE_PRO_ANNUAL: str = ""
+    STRIPE_PRICE_ENTERPRISE: str = ""
+
+    # ── Frontend URL (for Stripe redirects) ────────────────────────────────────
+    FRONTEND_URL: str = "http://localhost:5173"
+
     # ── Indicator engine defaults ─────────────────────────────────────────────
     # 6 months of daily candles gives enough data for EMA 200 + all indicators.
     # "1d" interval = end-of-day data. For intraday use "15m" or "1h".

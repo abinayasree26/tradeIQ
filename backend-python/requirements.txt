@@ -7,6 +7,7 @@ sqlalchemy>=2.0.30
 asyncpg>=0.29.0
 alembic>=1.13.1
 psycopg2-binary>=2.9.9
+aiosqlite>=0.20.0
 
 # Data Validation
 pydantic>=2.7.4
@@ -36,15 +37,27 @@ python-telegram-bot>=21.0.0
 # Reddit Sentiment (FREE)
 praw>=7.7.1
 
-# NLP Sentiment
+# NLP Sentiment — Phase 4 (FinBERT)
 transformers>=4.41.0
-torch>=2.0.0
+torch>=2.3.0
 
-# Caching
-redis>=5.0.0
+# ── Phase 5: Authentication + Billing ──────────────────────────────────
+# JWT tokens (encode/decode)
+python-jose[cryptography]>=3.3.0
+# Password hashing (bcrypt)
+passlib[bcrypt]>=1.7.4
+# OAuth2 form parsing (already in fastapi but listing for clarity)
+python-multipart>=0.0.9
+# Stripe billing (optional — leave empty keys for demo mode)
+stripe>=8.0.0
+# Email validation
+email-validator>=2.1.0
 
-# Task Queue
-celery>=5.4.0
+# Caching (Future feature)
+# redis>=5.0.0
+
+# Task Queue (Future feature)
+# celery>=5.4.0
 
 # Utilities
 python-dotenv>=1.0.0

@@ -39,6 +39,21 @@ export const CONFIG = {
     ALERT_TEMPLATES: `${STAP_API}/alerts/templates`,
     TG_TEST:         `${STAP_API}/alerts/telegram/test`,
     TG_CHATID:       `${STAP_API}/alerts/telegram/chat-id`,
+    SENTIMENT:       (sym) => `${STAP_API}/sentiment/${sym}`,
+    SENTIMENT_NEWS:  (sym) => `${STAP_API}/sentiment/${sym}/news`,
+    SENTIMENT_REDDIT:(sym) => `${STAP_API}/sentiment/${sym}/reddit`,
+
+    // Phase 5: Auth + Billing + WebSocket
+    AUTH_REGISTER:   `${STAP_API}/auth/register`,
+    AUTH_LOGIN:      `${STAP_API}/auth/login`,
+    AUTH_REFRESH:    `${STAP_API}/auth/refresh`,
+    AUTH_ME:         `${STAP_API}/auth/me`,
+    AUTH_SUBSCRIPTION: `${STAP_API}/auth/subscription`,
+    BILLING_PLANS:   `${STAP_API}/billing/plans`,
+    BILLING_CHECKOUT:`${STAP_API}/billing/checkout`,
+    BILLING_CANCEL:  `${STAP_API}/billing/cancel`,
+    WS_MARKET:       `${STAP_API.replace('http', 'ws')}/ws/market`,
+    WS_STATUS:       `${STAP_API}/ws/status`,
   },
 };
 
