@@ -86,6 +86,78 @@ class ConditionEvaluator:
             return pct, None
         return None, None
 
+    @staticmethod
+    def sentiment_score(indicators: dict) -> tuple[Optional[float], Optional[float]]:
+        """Sentiment score directly. base_value is target sentiment level."""
+        score = indicators.get("sentiment_score")
+        return score, None
+
+    @staticmethod
+    def evaluate_sub_condition(sub: dict, indicators: dict) -> bool:
+        """Evaluates a single sub-condition dictionary against current indicators."""
+        sub_type = sub.get("type")
+        extractor = EVALUATORS.get(sub_type)
+        if not extractor:
+            return False
+
+        current, base = extractor(indicators)
+        if current is None:
+            return False
+
+        # Determine the comparison value
+        target_val = sub.get("threshold") if sub.get("threshold") is not None else sub.get("value", 0.0)
+
+        # Determine direction/operator
+        operator = sub.get("operator")
+        if operator is None:
+            # Default operator based on type
+            if sub_type in ("rsi_level", "bb_squeeze"):
+                operator = "below"
+            else:
+                operator = "above"
+
+        # Calculate value to compare
+        if sub_type == "volume_rvol":
+            if base is None or base == 0:
+                return False
+            val_to_compare = current / base
+        else:
+            val_to_compare = current
+
+        if operator in ("above", "greater_than", ">", ">="):
+            return val_to_compare >= target_val
+        elif operator in ("below", "less_than", "<", "<="):
+            return val_to_compare <= target_val
+        return False
+
+    @staticmethod
+    def signal_fusion(indicators: dict, rule: dict) -> tuple[Optional[float], Optional[float]]:
+        """
+        Evaluates a signal fusion condition by combining multiple sub-conditions.
+        """
+        chain = rule.get("milestone_chain", {})
+        sub_conditions = chain.get("sub_conditions", [])
+        require_all = chain.get("require_all", True)
+        min_match = chain.get("min_match")
+
+        if not sub_conditions:
+            return None, None
+
+        matched_count = 0
+        for sub in sub_conditions:
+            if ConditionEvaluator.evaluate_sub_condition(sub, indicators):
+                matched_count += 1
+
+        if require_all:
+            satisfied = (matched_count == len(sub_conditions))
+        elif min_match is not None:
+            satisfied = (matched_count >= min_match)
+        else:
+            satisfied = (matched_count >= 1)
+
+        current_val = 1.0 if satisfied else 0.0
+        return current_val, 1.0
+
 
 EVALUATORS = {
     "volume_rvol":   ConditionEvaluator.volume_rvol,
@@ -95,6 +167,8 @@ EVALUATORS = {
     "macd_cross":    ConditionEvaluator.macd_cross,
     "bb_squeeze":    ConditionEvaluator.bb_squeeze,
     "ema_cross":     ConditionEvaluator.ema_cross,
+    "sentiment_score": ConditionEvaluator.sentiment_score,
+    "signal_fusion": ConditionEvaluator.signal_fusion,
 }
 
 
@@ -124,7 +198,11 @@ def check_milestones(rule: dict, indicators: dict) -> list[dict]:
         logger.warning(f"Unknown condition_type: {condition_type}")
         return []
 
-    current_value, computed_base = evaluator(indicators)
+    if condition_type == "signal_fusion":
+        current_value, computed_base = evaluator(indicators, rule)
+    else:
+        current_value, computed_base = evaluator(indicators)
+
     if current_value is None:
         return []
 

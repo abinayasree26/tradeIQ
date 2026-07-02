@@ -1,16 +1,19 @@
 import React from 'react';
 import { TrendingUp, TrendingDown, Clock, Activity, Target } from 'lucide-react';
 
-const MarketTickerBar = ({ symbol = 'NIFTY 50', livePrice = { price: 0, change: 0, changePercent: 0 } }) => {
+const MarketTickerBar = ({ symbol = 'NIFTY 50', livePrice = { price: 0, change: 0, changePercent: 0, isMarketOpen: false } }) => {
   const isUp = livePrice.change >= 0;
+  const isOpen = livePrice.isMarketOpen;
   
   return (
     <div className="market-ticker-bar">
       <div className="ticker-group">
         <div className="ticker-item status">
-          <div className="status-dot ready"></div>
+          <div className={`status-dot ${isOpen ? 'ready' : 'closed'}`}></div>
           <span className="label">MARKET:</span>
-          <span className="val" style={{ color: 'var(--success)' }}>OPEN</span>
+          <span className="val" style={{ color: isOpen ? 'var(--success)' : 'var(--text-dim)' }}>
+            {isOpen ? 'OPEN' : 'CLOSED'}
+          </span>
         </div>
         <div className="ticker-divider"></div>
         <div className="ticker-item symbol">

@@ -27,7 +27,12 @@ const LivePriceBanner = ({ symbol = 'NIFTY 50', onPriceUpdate }) => {
       }
       
       if (onPriceUpdate) {
-        onPriceUpdate({ price: result.price, change: result.change });
+        onPriceUpdate({
+          price: result.price,
+          change: result.change,
+          changePercent: result.changePct,
+          isMarketOpen: result.isMarketOpen
+        });
       }
       
       prevPriceRef.current = result.price;

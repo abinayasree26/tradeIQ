@@ -18,6 +18,7 @@ import { CONFIG, INDIA_SYMBOLS } from './config';
 import { useThresholdAlerts } from './services/useThresholdAlerts';
 import IndicatorPanel from './components/IndicatorPanel';
 import MilestoneAlerts from './components/MilestoneAlerts';
+import PatternPanel from './components/PatternPanel';
 
 const LOADING_STATE = {
   kpi: { avg_open: null, avg_close: null, avg_day_range: null },
@@ -101,17 +102,20 @@ function App() {
       try {
         let kpiRes, monthlyRes, dailyRes;
 
-        if (selectedSymbol === 'NIFTY 50') {
-          [kpiRes, monthlyRes, dailyRes] = await Promise.all([
-            executeQuery(`SELECT avg_open, avg_close, avg_day_range, open_above_prev_close_200_count, close_above_prev_close_500_count, close_below_prev_close_500_count FROM ${TABLES.summary} LIMIT 1`),
-            executeQuery(`SELECT year_month, avg_open, avg_close, avg_day_range FROM ${TABLES.monthlySummary} ORDER BY year_month ASC`),
-            executeQuery(`SELECT trade_date as time, open, high, low, close FROM ${TABLES.dailyPrices} ORDER BY trade_date ASC`)
-          ]);
-        } else {
-          // Fallback to Live API Historical for non-Nifty symbols
+        try {
+          if (selectedSymbol === 'NIFTY 50') {
+            [kpiRes, monthlyRes, dailyRes] = await Promise.all([
+              executeQuery(`SELECT avg_open, avg_close, avg_day_range, open_above_prev_close_200_count, close_above_prev_close_500_count, close_below_prev_close_500_count FROM ${TABLES.summary} LIMIT 1`),
+              executeQuery(`SELECT year_month, avg_open, avg_close, avg_day_range FROM ${TABLES.monthlySummary} ORDER BY year_month ASC`),
+              executeQuery(`SELECT trade_date as time, open, high, low, close FROM ${TABLES.dailyPrices} ORDER BY trade_date ASC`)
+            ]);
+          } else {
+            throw new Error("Use Live API for non-Nifty symbols");
+          }
+        } catch (dbErr) {
+          console.warn("Databricks query failed, falling back to Live API:", dbErr);
           const res = await fetch(`${CONFIG.ENDPOINTS.HISTORICAL}?symbol=${encodeURIComponent(selectedSymbol)}`);
           dailyRes = await res.json();
-          // Mock some KPI data for specific stocks
           const last = dailyRes[dailyRes.length - 1] || {};
           kpiRes = [{
             avg_open: parseFloat(last.open) || 0,
@@ -121,7 +125,7 @@ function App() {
             close_above_prev_close_500_count: 0,
             close_below_prev_close_500_count: 0
           }];
-          monthlyRes = []; 
+          monthlyRes = [];
         }
 
         setData({
@@ -554,6 +558,20 @@ function App() {
     </div>
   );
 
+  const renderPatterns = () => (
+    <div className="dashboard-content">
+      <div className="welcome">
+        <div>
+          <h1>Candlestick Patterns</h1>
+          <p>Doji · Hammer · Engulfing · Morning/Evening Star · Shooting Star · Three Soldiers/Crows · Harami</p>
+        </div>
+      </div>
+      <div style={{ maxWidth: 640, margin: '0 auto' }}>
+        <PatternPanel symbol={selectedSymbol} />
+      </div>
+    </div>
+  );
+
   const renderAlerts = () => (
     <div className="dashboard-content">
       <div className="welcome">
@@ -595,6 +613,9 @@ function App() {
           </button>
           <button className={`nav-item ${activeTab === 'signals' ? 'active' : ''}`} onClick={() => setActiveTab('signals')}>
             <Activity size={18} /> <span>Signals</span>
+          </button>
+          <button className={`nav-item ${activeTab === 'patterns' ? 'active' : ''}`} onClick={() => setActiveTab('patterns')}>
+            <Sparkles size={18} /> <span>Patterns</span>
           </button>
           <button className={`nav-item ${activeTab === 'alerts' ? 'active' : ''}`} onClick={() => setActiveTab('alerts')}>
             <Bell size={18} /> <span>Alerts</span>
@@ -693,8 +714,8 @@ function App() {
           </div>
           
           <div className="top-actions">
-             <div className="market-status-pill">
-               <Clock size={14} /> <span>MARKET OPEN</span>
+             <div className={`market-status-pill ${livePrice.isMarketOpen ? '' : 'closed'}`}>
+               <Clock size={14} /> <span>{livePrice.isMarketOpen ? 'MARKET OPEN' : 'MARKET CLOSED'}</span>
              </div>
             <button className="icon-btn" onClick={toggleTheme}>
               {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
@@ -710,6 +731,7 @@ function App() {
             {activeTab === 'news' && renderNewsTab()}
             {activeTab === 'historical' && renderHistorical()}
             {activeTab === 'signals' && renderSignals()}
+            {activeTab === 'patterns' && renderPatterns()}
             {activeTab === 'alerts' && renderAlerts()}
             {activeTab === 'settings' && renderSettings()}
           </div>

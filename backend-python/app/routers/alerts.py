@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, desc
 
 from app.core.database import get_db
-from app.models.domain import AlertRule, AlertEvent
+from app.models.domain import AlertRule, AlertEvent, SentimentSnapshot
 from app.services.india_market import fetch_ohlcv, fetch_quote
 from app.services.indicator_engine import build_dataframe, compute_indicators
 from app.services.milestone_engine import (
@@ -39,6 +39,9 @@ class MilestoneChain(BaseModel):
     steps: list[float]
     base_value: Optional[float] = None
     direction: str = "above"   # "above" or "below"
+    sub_conditions: Optional[list[dict]] = None
+    require_all: bool = True
+    min_match: Optional[int] = None
 
 
 class AlertRuleCreate(BaseModel):
@@ -137,6 +140,19 @@ async def check_symbol_milestones(symbol: str, db: AsyncSession = Depends(get_db
     df = build_dataframe(ohlcv)
     indicators = compute_indicators(df)
 
+    # Fetch latest sentiment snapshot if available
+    res_sent = await db.execute(
+        select(SentimentSnapshot)
+        .where(SentimentSnapshot.symbol == sym)
+        .order_by(desc(SentimentSnapshot.timestamp))
+        .limit(1)
+    )
+    sent_snap = res_sent.scalar_one_or_none()
+    if sent_snap and sent_snap.combined_score is not None:
+        indicators["sentiment_score"] = sent_snap.combined_score / 100.0
+    else:
+        indicators["sentiment_score"] = 0.0
+
     # Fetch active rules for this symbol
     result = await db.execute(
         select(AlertRule).where(AlertRule.symbol == sym, AlertRule.is_active == True)
@@ -176,6 +192,7 @@ async def check_symbol_milestones(symbol: str, db: AsyncSession = Depends(get_db
                 stop_loss=rec.get("stop_loss"),
                 target_1=rec.get("target_1"),
                 target_2=rec.get("target_2"),
+                sub_conditions=rule.milestone_chain.get("sub_conditions") if isinstance(rule.milestone_chain, dict) else None,
             )
             fired_events.append({
                 "rule_id": rule.id,
@@ -217,6 +234,19 @@ async def fire_alerts(symbol: str, db: AsyncSession = Depends(get_db)):
         indicators["close"] = quote["price"]
         indicators["current_volume"] = quote.get("volume", indicators.get("current_volume", 0))
 
+    # Fetch latest sentiment snapshot if available
+    res_sent = await db.execute(
+        select(SentimentSnapshot)
+        .where(SentimentSnapshot.symbol == sym)
+        .order_by(desc(SentimentSnapshot.timestamp))
+        .limit(1)
+    )
+    sent_snap = res_sent.scalar_one_or_none()
+    if sent_snap and sent_snap.combined_score is not None:
+        indicators["sentiment_score"] = sent_snap.combined_score / 100.0
+    else:
+        indicators["sentiment_score"] = 0.0
+
     result = await db.execute(
         select(AlertRule).where(AlertRule.symbol == sym, AlertRule.is_active == True)
     )
@@ -256,6 +286,7 @@ async def fire_alerts(symbol: str, db: AsyncSession = Depends(get_db)):
                 stop_loss=rec.get("stop_loss"),
                 target_1=rec.get("target_1"),
                 target_2=rec.get("target_2"),
+                sub_conditions=rule.milestone_chain.get("sub_conditions") if isinstance(rule.milestone_chain, dict) else None,
             )
 
             # Send Telegram

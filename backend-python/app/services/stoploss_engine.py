@@ -16,6 +16,83 @@ from app.services.indicator_engine import (
 )
 
 
+def calculate_volume_profile_target(
+    df: pd.DataFrame,
+    entry_price: float,
+    direction: str = "long",
+    n_bins: int = 20,
+) -> dict:
+    """
+    Method 6: Volume Profile Target.
+    Buckets historical price into N bins weighted by volume.
+    Returns the High Volume Node (HVN) above the current price as a target level,
+    along with a corresponding support level as stop-loss.
+    """
+    if df.empty or entry_price <= 0:
+        return {}
+
+    try:
+        price_min = df["Low"].min()
+        price_max = df["High"].max()
+        if price_max == price_min:
+            price_max += 0.01
+
+        bin_size = (price_max - price_min) / n_bins
+        bins = []
+        for i in range(n_bins):
+            low = price_min + i * bin_size
+            high = low + bin_size
+            bins.append({
+                "low": low,
+                "high": high,
+                "mid": (low + high) / 2.0,
+                "volume": 0.0
+            })
+
+        for _, row in df.iterrows():
+            close = row["Close"]
+            vol = row.get("Volume", 0.0)
+            volume = float(vol) if vol is not None and not pd.isna(vol) else 0.0
+            bin_idx = int((close - price_min) / bin_size)
+            if bin_idx >= n_bins:
+                bin_idx = n_bins - 1
+            elif bin_idx < 0:
+                bin_idx = 0
+            bins[bin_idx]["volume"] += volume
+
+        # Find HVN above and below entry_price
+        above_bins = [b for b in bins if b["mid"] > entry_price]
+        below_bins = [b for b in bins if b["mid"] < entry_price]
+
+        hvn_above = max(above_bins, key=lambda x: x["volume"])["mid"] if above_bins else entry_price * 1.05
+        hvn_below = max(below_bins, key=lambda x: x["volume"])["mid"] if below_bins else entry_price * 0.95
+
+        if direction == "long":
+            sl = hvn_below
+            t1 = hvn_above
+            t2 = t1 + abs(t1 - entry_price) * 0.5
+        else:
+            sl = hvn_above
+            t1 = hvn_below
+            t2 = t1 - abs(entry_price - t1) * 0.5
+
+        risk = abs(entry_price - sl)
+        reward = abs(t1 - entry_price)
+        rr = reward / risk if risk > 0 else 0.0
+
+        return {
+            "stop_loss": _r(sl),
+            "target_1": _r(t1),
+            "target_2": _r(t2),
+            "risk_reward": _r(rr),
+            "hvn_above": _r(hvn_above),
+            "method": "Volume Profile Target",
+            "description": f"Target is the High Volume Node (HVN) at {_r(t1)} based on 20-bin volume profile.",
+        }
+    except Exception:
+        return {}
+
+
 def calculate_all(
     df: pd.DataFrame,
     indicators: dict,
@@ -145,6 +222,11 @@ def calculate_all(
             "description": "Target next R1/R2 resistance. Best for intraday and swing trades.",
             "all_pivots": pivots,
         }
+
+    # ── Method 6: Volume Profile Target ───────────────────────────────────────
+    vp_res = calculate_volume_profile_target(df, entry_price, direction)
+    if vp_res:
+        results["volume_profile"] = vp_res
 
     # ── Best recommendation ───────────────────────────────────────────────────
     best = _pick_best_method(results, indicators)

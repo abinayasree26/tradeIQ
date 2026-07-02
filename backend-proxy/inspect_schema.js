@@ -64,7 +64,7 @@ async function main() {
     } catch (e) { output += "Error: " + e.message + "\n"; }
   }
 
-  fs.writeFileSync('./server/schema_output.txt', output);
+  fs.writeFileSync('./schema_output.txt', output);
   process.stdout.write(output);
 }
 

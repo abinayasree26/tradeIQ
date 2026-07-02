@@ -19,6 +19,13 @@ except ImportError as e:
     logger.warning(f"Phase 4 (Sentiment) disabled — missing dependency: {e}")
 
 try:
+    from app.routers import patterns
+    HAS_PATTERNS = True
+except ImportError as e:
+    HAS_PATTERNS = False
+    logger.warning(f"Patterns disabled — missing dependency: {e}")
+
+try:
     from app.routers import auth, billing, websocket
     HAS_AUTH = True
 except ImportError as e:
@@ -76,6 +83,9 @@ app.include_router(alerts.router)
 if HAS_SENTIMENT:
     app.include_router(sentiment.router)
 
+if HAS_PATTERNS:
+    app.include_router(patterns.router)
+
 # Phase 5: Auth + Billing + WebSocket (requires jose, passlib, stripe)
 if HAS_AUTH:
     app.include_router(auth.router)
@@ -96,6 +106,7 @@ def home():
             "phase_2_api": "active",
             "phase_3_frontend": "active",
             "phase_4_sentiment": "active" if HAS_SENTIMENT else "disabled (install: transformers, praw)",
+            "phase_4_patterns": "active" if HAS_PATTERNS else "disabled",
             "phase_5_auth": "active" if HAS_AUTH else "disabled (install: python-jose, passlib, stripe)",
         },
         "endpoints": {
@@ -103,6 +114,7 @@ def home():
             "indicators": "/indicators/...",
             "alerts": "/alerts/...",
             **({"sentiment": "/sentiment/..."} if HAS_SENTIMENT else {}),
+            **({"patterns": "/patterns/..."} if HAS_PATTERNS else {}),
             **({"auth": "/auth/...", "billing": "/billing/...", "websocket": "ws://host/ws/market"} if HAS_AUTH else {}),
         },
     }

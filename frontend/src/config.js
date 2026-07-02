@@ -42,6 +42,8 @@ export const CONFIG = {
     SENTIMENT:       (sym) => `${STAP_API}/sentiment/${sym}`,
     SENTIMENT_NEWS:  (sym) => `${STAP_API}/sentiment/${sym}/news`,
     SENTIMENT_REDDIT:(sym) => `${STAP_API}/sentiment/${sym}/reddit`,
+    PATTERNS:        (sym) => `${STAP_API}/patterns/${sym}`,
+    PATTERNS_HISTORY:(sym) => `${STAP_API}/patterns/${sym}/history`,
 
     // Phase 5: Auth + Billing + WebSocket
     AUTH_REGISTER:   `${STAP_API}/auth/register`,

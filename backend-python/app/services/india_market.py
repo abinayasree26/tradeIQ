@@ -83,7 +83,8 @@ DEFAULT_WATCHLIST = [
 
 def _yf_symbol(symbol: str) -> str:
     """Resolve internal symbol name to yfinance ticker string."""
-    info = INDIA_SYMBOLS.get(symbol.upper())
+    clean_symbol = symbol.upper().replace(" ", "").replace("-", "")
+    info = INDIA_SYMBOLS.get(clean_symbol)
     if info:
         return info["yf"]
     # Fallback: assume user passed raw yfinance ticker

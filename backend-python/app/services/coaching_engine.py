@@ -23,6 +23,7 @@ def build_milestone_message(
     stop_loss: Optional[float] = None,
     target_1: Optional[float] = None,
     target_2: Optional[float] = None,
+    sub_conditions: Optional[list[dict]] = None,
 ) -> str:
     """
     Build the full coaching message for a fired milestone.
@@ -44,6 +45,7 @@ def build_milestone_message(
         "macd_cross":     _msg_macd,
         "bb_squeeze":     _msg_bb_squeeze,
         "ema_cross":      _msg_ema_cross,
+        "signal_fusion":  _msg_fusion,
     }
 
     builder = builders.get(condition_type, _msg_generic)
@@ -54,6 +56,7 @@ def build_milestone_message(
         base_value=base_value,
         price=price,
         indicators=indicators,
+        sub_conditions=sub_conditions,
     )
 
     # Append multi-signal context
@@ -211,6 +214,76 @@ def _msg_ema_cross(symbol, milestone_pct, current_value, base_value, price, indi
         f"Price: ₹{price:,.2f} | Gap: {pct_gap:+.2f}%\n"
         f"What to do: {action}"
     )
+
+
+def _msg_fusion(symbol, milestone_pct, current_value, base_value, price, indicators, sub_conditions=None, **_) -> str:
+    """Builder for signal fusion alerts."""
+    lines = [
+        f"⚡ SIGNAL FUSION ALERT — {symbol}",
+        f"Multiple technical sub-conditions have fused together at Price: ₹{price:,.2f}."
+    ]
+
+    if sub_conditions:
+        lines.append("\n📌 Contributing Signals:")
+        for sub in sub_conditions:
+            sub_type = sub.get("type", "unknown")
+            name_map = {
+                "volume_rvol": "Volume Surge (RVOL)",
+                "rsi_level": "RSI Level",
+                "price_breakout": "Price Breakout",
+                "price_pct": "Price Change %",
+                "macd_cross": "MACD Crossover",
+                "bb_squeeze": "Bollinger Squeeze",
+                "ema_cross": "EMA Crossover",
+                "sentiment_score": "Sentiment Score",
+            }
+            readable_name = name_map.get(sub_type, sub_type.replace("_", " ").title())
+
+            curr_str = "N/A"
+            if sub_type == "volume_rvol":
+                rvol = indicators.get("rvol")
+                if rvol is None:
+                    current_vol = indicators.get("current_volume")
+                    avg_vol = indicators.get("avg_volume_20")
+                    if current_vol is not None and avg_vol and avg_vol > 0:
+                        rvol = current_vol / avg_vol
+                curr_str = f"{rvol:.2f}× average" if rvol is not None else "N/A"
+            elif sub_type == "rsi_level":
+                rsi = indicators.get("rsi_14")
+                if rsi is not None:
+                    zone = "Oversold" if rsi < 30 else ("Overbought" if rsi > 70 else "Neutral")
+                    curr_str = f"{rsi:.1f} ({zone})"
+            elif sub_type == "sentiment_score":
+                score = indicators.get("sentiment_score")
+                if score is not None:
+                    label = "Bullish" if score > 0.15 else ("Bearish" if score < -0.15 else "Neutral")
+                    curr_str = f"{score:+.2f} ({label})"
+            elif sub_type == "price_breakout":
+                curr_str = f"₹{indicators.get('close', price):,.2f}"
+            elif sub_type == "price_pct":
+                pct = indicators.get("pct_change")
+                curr_str = f"{pct:+.2f}%" if pct is not None else "N/A"
+            elif sub_type == "macd_cross":
+                hist = indicators.get("macd_hist")
+                curr_str = f"Histogram: {hist:.2f}" if hist is not None else "N/A"
+            elif sub_type == "bb_squeeze":
+                bw = indicators.get("bb_bandwidth")
+                curr_str = f"Bandwidth: {bw:.4f}" if bw is not None else "N/A"
+            elif sub_type == "ema_cross":
+                ema9 = indicators.get("ema_9")
+                ema21 = indicators.get("ema_21")
+                if ema9 and ema21:
+                    pct = (ema9 - ema21) / ema21 * 100
+                    curr_str = f"Gap: {pct:+.2f}%"
+
+            # Format condition requirement
+            target_val = sub.get("threshold") if sub.get("threshold") is not None else sub.get("value", 0.0)
+            operator = sub.get("operator")
+            op_str = f" {operator} {target_val}" if operator else f" >= {target_val}"
+
+            lines.append(f"  • {readable_name}: {curr_str} (Req:{op_str})")
+
+    return "\n".join(lines)
 
 
 def _msg_generic(symbol, milestone_pct, current_value, base_value, price, **_) -> str:

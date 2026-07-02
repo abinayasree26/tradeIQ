@@ -72,11 +72,16 @@ async def get_stoploss_targets(
     indicators = compute_indicators(df)
     results = calculate_all(df, indicators, entry_price=entry_price, direction=direction)
 
+    volume_profile_target = None
+    if "volume_profile" in results:
+        volume_profile_target = results["volume_profile"].get("hvn_above")
+
     return {
         "symbol": symbol.upper(),
         "entry_price": entry_price,
         "direction": direction,
         "methods": results,
+        "volume_profile_target": volume_profile_target,
     }
 
 

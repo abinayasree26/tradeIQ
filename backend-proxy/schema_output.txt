@@ -1,43 +1,18 @@
 
 === SCHEMA: workspace.default.nifty_daily_prices ===
- index_name: string
- trade_date: date
- open: double
- high: double
- low: double
- close: double
- instrument_type: string
+{"error_code":403,"message":"Invalid access token. [ReqId: a8f963a9-fc7c-4f33-b590-b6b4ca5821e7]"}
 
 === SAMPLE: workspace.default.nifty_daily_prices ===
-Columns: index_name, trade_date, open, high, low, close, instrument_type
-NIFTY 50 | 2024-12-31 | 23560.6 | 23689.85 | 23460.45 | 23644.8 | INDEX
-NIFTY 50 | 2024-12-30 | 23796.9 | 23915.35 | 23599.3 | 23644.9 | INDEX
-NIFTY 50 | 2024-12-27 | 23801.4 | 23938.85 | 23800.6 | 23813.4 | INDEX
+{"error_code":403,"message":"Invalid access token. [ReqId: 9e32a351-995b-4aa0-8e90-2111f71d0973]"}
 
 === SCHEMA: workspace.default.nifty_summary_2024 ===
- avg_open: double
- avg_close: double
- open_above_prev_close_200_count: bigint
- close_above_prev_close_500_count: bigint
- close_below_prev_close_500_count: bigint
- avg_day_range: double
+{"error_code":403,"message":"Invalid access token. [ReqId: e7e7b676-19ca-4e9b-a0e5-cc266aaa8282]"}
 
 === SAMPLE: workspace.default.nifty_summary_2024 ===
-Columns: avg_open, avg_close, open_above_prev_close_200_count, close_above_prev_close_500_count, close_below_prev_close_500_count, avg_day_range
-23492.69497991969 | 23477.62871485944 | 5 | 3 | 3 | 237.31465863453795
+{"error_code":403,"message":"Invalid access token. [ReqId: 13d11b78-7674-4510-9c90-d14d872bc0fe]"}
 
 === SCHEMA: workspace.default.nifty_monthly_summary_2024 ===
- index_name: string
- year_month: string
- avg_open: double
- avg_close: double
- avg_day_range: double
- open_above_prev_close_200_count: bigint
- close_above_prev_close_500_count: bigint
- close_below_prev_close_500_count: bigint
+{"error_code":403,"message":"Invalid access token. [ReqId: f1100061-94e2-4caa-b826-91078b9c84a0]"}
 
 === SAMPLE: workspace.default.nifty_monthly_summary_2024 ===
-Columns: index_name, year_month, avg_open, avg_close, avg_day_range, open_above_prev_close_200_count, close_above_prev_close_500_count, close_below_prev_close_500_count
-NIFTY 50 | 2024-01 | 21655.131818181817 | 21631.89318181818 | 226.17272727272723 | 0 | 0 | 0
-NIFTY 50 | 2024-02 | 21967.771428571425 | 21947.27857142857 | 218.4833333333334 | 0 | 0 | 0
-NIFTY 50 | 2024-03 | 22171.70263157895 | 22187.310526315792 | 213.63684210526367 | 0 | 0 | 0
+{"error_code":403,"message":"Invalid access token. [ReqId: d318dab4-58bc-4bea-856d-4e0b4093d674]"}
