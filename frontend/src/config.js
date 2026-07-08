@@ -48,6 +48,7 @@ export const CONFIG = {
     // Phase 5: Auth + Billing + WebSocket
     AUTH_REGISTER:   `${STAP_API}/auth/register`,
     AUTH_LOGIN:      `${STAP_API}/auth/login`,
+    AUTH_GOOGLE:     `${STAP_API}/auth/google`,
     AUTH_REFRESH:    `${STAP_API}/auth/refresh`,
     AUTH_ME:         `${STAP_API}/auth/me`,
     AUTH_SUBSCRIPTION: `${STAP_API}/auth/subscription`,

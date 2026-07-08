@@ -112,6 +112,36 @@ async def create_user(
     logger.info(f"New user registered: {email}")
     return user
 
+
+async def create_social_user(
+    email: str,
+    name: str,
+    db: AsyncSession,
+) -> User:
+    """Create a new user registered via social login (Google OAuth2)."""
+    # Check if email exists
+    existing = await get_user_by_email(email, db)
+    if existing:
+        return existing
+
+    # Generate a random password since login is via OAuth
+    random_password = secrets.token_urlsafe(32)
+
+    user = User(
+        email=email.lower().strip(),
+        password_hash=hash_password(random_password),
+        name=name.strip(),
+        subscription_tier="free",
+        api_key=secrets.token_urlsafe(32),
+        is_verified=True,  # Social logins are pre-verified by the provider
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    logger.info(f"New social user registered: {email}")
+    return user
+
+
 async def authenticate_user(email: str, password: str, db: AsyncSession) -> Optional[User]:
     """Verify email + password, return user or None."""
     user = await get_user_by_email(email.lower().strip(), db)

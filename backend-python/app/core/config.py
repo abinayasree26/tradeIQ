@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     # ── Market data ───────────────────────────────────────────────────────────
     # Finnhub: free news API (60 req/min). Get key at finnhub.io/register
     FINNHUB_API_KEY: str = ""
+    GOOGLE_CLIENT_ID: str = ""
 
     # ── Database — Proxmox VM 104 (moneyflow-server, 192.168.86.245) ─────────
     # PostgreSQL 14 running on the home Proxmox server.

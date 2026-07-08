@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.services.auth_service import (
     create_user,
+    create_social_user,
     authenticate_user,
     create_access_token,
     create_refresh_token,
@@ -29,6 +30,11 @@ from app.services.auth_service import (
 )
 from app.models.domain import User
 from app.utils.logger import logger
+from app.core.config import settings
+
+# Google Auth Libraries
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 
 router = APIRouter(prefix="/auth", tags=["Authentication (Phase 5)"])
 
@@ -199,6 +205,69 @@ async def get_subscription(user: User = Depends(require_user)):
         "limits": limits,
         "upgrade_url": "/billing/checkout" if user.subscription_tier == "free" else None,
     }
+
+
+class GoogleLoginRequest(BaseModel):
+    token: str
+
+
+@router.post("/google", response_model=LoginResponse)
+async def google_login(body: GoogleLoginRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Login or Sign Up with Google OAuth2.
+    Verifies the client-side credential token and returns the TradeIQ JWT tokens.
+    """
+    if not settings.GOOGLE_CLIENT_ID:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="GOOGLE_CLIENT_ID is not configured in backend settings"
+        )
+
+    try:
+        # Verify the ID Token
+        id_info = id_token.verify_oauth2_token(
+            body.token,
+            google_requests.Request(),
+            settings.GOOGLE_CLIENT_ID
+        )
+
+        # Validate issuer
+        if id_info['iss'] not in ['accounts.google.com', 'https://accounts.google.com']:
+            raise ValueError('Wrong issuer.')
+
+        email = id_info.get("email")
+        name = id_info.get("name", "Google User")
+
+        if not email:
+            raise ValueError('Email missing from Google token.')
+
+    except ValueError as e:
+        logger.error(f"Google login token verification failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid Google ID Token: {str(e)}"
+        )
+
+    # Get or create the user
+    user = await create_social_user(email=email, name=name, db=db)
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account disabled"
+        )
+
+    token_data = {"sub": str(user.id), "email": user.email, "tier": user.subscription_tier}
+    access_token = create_access_token(token_data)
+    refresh_token = create_refresh_token(token_data)
+
+    logger.info(f"User logged in via Google OAuth: {user.email}")
+
+    return LoginResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user=_user_dict(user),
+    )
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -126,13 +126,74 @@ export default function App() {
             executeQuery(`SELECT year_month, avg_open, avg_close, avg_day_range FROM ${TABLES.monthlySummary} ORDER BY year_month ASC`),
             executeQuery(`SELECT trade_date as time, open, high, low, close FROM ${TABLES.dailyPrices} ORDER BY trade_date ASC`),
           ]);
+          if (!dailyRes || dailyRes.length === 0) {
+            throw new Error("Databricks returned empty, fallback to local API");
+          }
         } else throw new Error('Use live API');
-      } catch {
+      } catch (err) {
+        console.warn("Databricks query failed or skipped, falling back to local STAP API", err);
         const res = await fetch(CONFIG.STAP.OHLCV(selectedSymbol));
-        dailyRes = await res.json();
-        const last = dailyRes[dailyRes.length - 1] || {};
-        kpiRes = [{ avg_open: parseFloat(last.open) || 0, avg_close: parseFloat(last.close) || 0, avg_day_range: (parseFloat(last.high) - parseFloat(last.low)) || 0 }];
-        monthlyRes = [];
+        const json = await res.json();
+        dailyRes = json.candles || [];
+        
+        if (dailyRes.length > 0) {
+          let sumOpen = 0, sumClose = 0, sumRange = 0;
+          let openAbove200 = 0, closeAbove500 = 0, closeBelow500 = 0;
+          const monthlyGroups = {};
+          
+          for (let i = 0; i < dailyRes.length; i++) {
+            const candle = dailyRes[i];
+            const open = parseFloat(candle.open) || 0;
+            const close = parseFloat(candle.close) || 0;
+            const high = parseFloat(candle.high) || 0;
+            const low = parseFloat(candle.low) || 0;
+            const range = high - low;
+            
+            sumOpen += open;
+            sumClose += close;
+            sumRange += range;
+            
+            if (i > 0) {
+              const prevClose = parseFloat(dailyRes[i - 1].close) || open;
+              if (open - prevClose > 200) openAbove200++;
+              if (close - prevClose > 500) closeAbove500++;
+              if (prevClose - close > 500) closeBelow500++;
+            }
+            
+            const dateObj = new Date(candle.time * 1000);
+            const yearMonth = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
+            if (!monthlyGroups[yearMonth]) {
+              monthlyGroups[yearMonth] = { sumOpen: 0, sumClose: 0, sumRange: 0, count: 0 };
+            }
+            monthlyGroups[yearMonth].sumOpen += open;
+            monthlyGroups[yearMonth].sumClose += close;
+            monthlyGroups[yearMonth].sumRange += range;
+            monthlyGroups[yearMonth].count++;
+          }
+          
+          const len = dailyRes.length;
+          kpiRes = [{
+            avg_open: sumOpen / len,
+            avg_close: sumClose / len,
+            avg_day_range: sumRange / len,
+            open_above_prev_close_200_count: openAbove200,
+            close_above_prev_close_500_count: closeAbove500,
+            close_below_prev_close_500_count: closeBelow500
+          }];
+          
+          monthlyRes = Object.keys(monthlyGroups).sort().map(ym => {
+            const group = monthlyGroups[ym];
+            return {
+              year_month: ym,
+              avg_open: group.sumOpen / group.count,
+              avg_close: group.sumClose / group.count,
+              avg_day_range: group.sumRange / group.count
+            };
+          });
+        } else {
+          kpiRes = [{ avg_open: 0, avg_close: 0, avg_day_range: 0 }];
+          monthlyRes = [];
+        }
       }
       setData({
         kpi: {
@@ -192,6 +253,67 @@ export default function App() {
   };
 
   const handleLogout = () => { localStorage.removeItem('tradeiq-token'); setUser(null); setActiveTab('dashboard'); };
+
+  const handleGoogleLogin = async (idToken) => {
+    setAuthError(null);
+    setAuthLoading(true);
+    try {
+      const res = await fetch(CONFIG.STAP.AUTH_GOOGLE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: idToken }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || 'Google login failed');
+      const initials = d.user.name.split(' ').filter(Boolean).map(n => n[0]).join('').toUpperCase().slice(0, 2);
+      localStorage.setItem('tradeiq-token', d.access_token);
+      setUser({ name: d.user.name, email: d.user.email, avatar: initials || 'US', lastLogin: new Date().toLocaleString() });
+      setAuthEmail('');
+      setAuthPassword('');
+    } catch (err) {
+      setAuthError(err.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user || activeTab !== 'settings') return;
+
+    let checkInterval;
+    const initGoogleSignIn = () => {
+      if (typeof window.google !== 'undefined' && window.google.accounts) {
+        clearInterval(checkInterval);
+        try {
+          window.google.accounts.id.initialize({
+            client_id: "44230614620-v0b6pig1g702nllkv043hp00755kfpif.apps.googleusercontent.com",
+            callback: (response) => {
+              if (response.credential) {
+                handleGoogleLogin(response.credential);
+              }
+            }
+          });
+          
+          const btnElem = document.getElementById("google-signin-btn");
+          if (btnElem) {
+            window.google.accounts.id.renderButton(btnElem, {
+              theme: "outline",
+              size: "large",
+              width: 320,
+              text: "signin_with"
+            });
+          }
+        } catch (err) {
+          console.warn("Failed to initialize Google Sign-In:", err);
+        }
+      }
+    };
+
+    checkInterval = setInterval(initGoogleSignIn, 500);
+    initGoogleSignIn();
+
+    return () => clearInterval(checkInterval);
+  }, [user, activeTab]);
 
   /* ─── symbol selection ───────────────────────────────────────────────────── */
   const selectSymbol = (sym) => {
@@ -479,6 +601,14 @@ export default function App() {
                   {authLoading ? 'Processing...' : authTab === 'login' ? 'Log In' : 'Create Account'}
                 </button>
               </form>
+              <div style={{ display: 'flex', alignItems: 'center', margin: '16px 0', color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                <span style={{ padding: '0 8px' }}>or</span>
+                <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <div id="google-signin-btn" />
+              </div>
             </div>
           )}
         </div>

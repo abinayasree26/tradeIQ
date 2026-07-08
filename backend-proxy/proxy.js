@@ -161,6 +161,7 @@ const server = http.createServer((req, res) => {
     
     const SYMBOL_MAP = {
       'NIFTY 50': '%5ENSEI',
+      'NIFTY50': '%5ENSEI',
       'BANKNIFTY': '%5ENSEBANK',
       'RELIANCE': 'RELIANCE.NS',
       'TCS': 'TCS.NS',
@@ -170,7 +171,14 @@ const server = http.createServer((req, res) => {
       'SBIN': 'SBIN.NS'
     };
     
-    const yahooSymbol = SYMBOL_MAP[symbolStr] || symbolStr;
+    let yahooSymbol = SYMBOL_MAP[symbolStr];
+    if (!yahooSymbol) {
+      if (symbolStr === 'SENSEX') {
+        yahooSymbol = '%5EBSESN';
+      } else {
+        yahooSymbol = symbolStr.includes('.') ? symbolStr : `${symbolStr}.NS`;
+      }
+    }
     const now = Date.now();
     
     // Per-symbol cache
@@ -225,11 +233,18 @@ const server = http.createServer((req, res) => {
     const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
     const symbolStr = parsedUrl.searchParams.get('symbol') || 'NIFTY 50';
     const SYMBOL_MAP = {
-      'NIFTY 50': '%5ENSEI', 'BANKNIFTY': '%5ENSEBANK', 'RELIANCE': 'RELIANCE.NS',
+      'NIFTY 50': '%5ENSEI', 'NIFTY50': '%5ENSEI', 'BANKNIFTY': '%5ENSEBANK', 'RELIANCE': 'RELIANCE.NS',
       'TCS': 'TCS.NS', 'INFY': 'INFY.NS', 'TATAMOTORS': 'TATAMOTORS.NS',
       'HDFCBANK': 'HDFCBANK.NS', 'SBIN': 'SBIN.NS'
     };
-    const yahooSymbol = SYMBOL_MAP[symbolStr] || symbolStr;
+    let yahooSymbol = SYMBOL_MAP[symbolStr];
+    if (!yahooSymbol) {
+      if (symbolStr === 'SENSEX') {
+        yahooSymbol = '%5EBSESN';
+      } else {
+        yahooSymbol = symbolStr.includes('.') ? symbolStr : `${symbolStr}.NS`;
+      }
+    }
 
     (async () => {
       try {
@@ -362,12 +377,12 @@ const server = http.createServer((req, res) => {
           if (!res.writableEnded) res.end();
         };
 
-        // ─── 1. GROQ — free, llama3-70b-8192, 30 req/min ─────────────────────
+        // ─── 1. GROQ — free, llama-3.3-70b-versatile, 30 req/min ─────────────────────
         if (GROQ_KEY) {
-          console.log('[AI] Trying Groq (llama3-70b-8192)...');
+          console.log('[AI] Trying Groq (llama-3.3-70b-versatile)...');
           try {
             const payload = JSON.stringify({
-              model: 'llama3-70b-8192',
+              model: 'llama-3.3-70b-versatile',
               messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...msgs],
               max_tokens: 800,
               stream: true,
@@ -560,7 +575,7 @@ const server = http.createServer((req, res) => {
               req2.on('error', e => { console.warn('[Claude] Error:', e.message); resolve('error'); });
               req2.write(payload); req2.end();
             });
-            if (!res.writableEnded) return;
+            if (res.writableEnded) return;
           } catch(e) {
             console.warn('[Claude] Failed:', e.message);
             if (res.writableEnded) return;
