@@ -51,31 +51,81 @@ export default function AiChat({ isOpen, onClose, selectedSymbol, databricksData
     setInput('');
     setLoading(true);
 
+    // Add empty assistant message that we'll stream into
+    setMessages(m => [...m, { role: 'assistant', content: '' }]);
+
     try {
       const contextStr = databricksData
-        ? `Context for ${databricksData.symbol}:\n- Avg Open: ${databricksData.summary?.avg_open}\n- Avg Close: ${databricksData.summary?.avg_close}\n- Recent data points: ${databricksData.recent?.length}`
+        ? `Context for ${databricksData.symbol}: Avg Open ₹${databricksData.summary?.avg_open}, Avg Close ₹${databricksData.summary?.avg_close}.`
         : '';
 
       const res = await fetch(CONFIG.ENDPOINTS.AI_CHAT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: userText,
-          symbol:  selectedSymbol,
-          context: contextStr,
-          history: messages.slice(-6).map(m => ({ role: m.role, content: m.content })),
+          message:  userText,
+          symbol:   selectedSymbol,
+          context:  contextStr,
+          history:  messages.slice(-6).map(m => ({ role: m.role, content: m.content })),
         }),
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const reply = data.response || data.message || data.content || 'Sorry, I could not generate a response.';
-      setMessages(m => [...m, { role: 'assistant', content: reply }]);
+
+      const contentType = res.headers.get('content-type') || '';
+
+      // ── SSE streaming response (Groq / Ollama / Claude) ──────────────────
+      if (contentType.includes('text/event-stream')) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop();
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const data = line.slice(6).trim();
+            if (data === '[DONE]') break;
+            try {
+              const parsed = JSON.parse(data);
+              const token = parsed.token || parsed.delta?.content || '';
+              if (token) {
+                setMessages(m => {
+                  const updated = [...m];
+                  updated[updated.length - 1] = {
+                    ...updated[updated.length - 1],
+                    content: updated[updated.length - 1].content + token,
+                  };
+                  return updated;
+                });
+              }
+            } catch (_) {}
+          }
+        }
+      } else {
+        // ── Plain JSON response (Gemini REST, demo sandbox) ───────────────
+        const data = await res.json();
+        const reply = data.response || data.message || data.content || data.text || 'No response';
+        setMessages(m => {
+          const updated = [...m];
+          updated[updated.length - 1] = { ...updated[updated.length - 1], content: reply };
+          return updated;
+        });
+      }
     } catch (e) {
-      setMessages(m => [...m, {
-        role: 'assistant',
-        content: `⚠️ I couldn't connect to the AI service right now.\n\nEnsure the Node proxy is running on port 3000 with a valid Anthropic API key.\n\nError: ${e.message}`,
-      }]);
+      setMessages(m => {
+        const updated = [...m];
+        updated[updated.length - 1] = {
+          ...updated[updated.length - 1],
+          content: `⚠️ Connection error: ${e.message}\n\nEnsure the Node proxy is running:\n\`\`\`\ncd backend-proxy && node proxy.js\n\`\`\``,
+        };
+        return updated;
+      });
     } finally {
       setLoading(false);
     }
@@ -141,7 +191,7 @@ export default function AiChat({ isOpen, onClose, selectedSymbol, databricksData
           </div>
         ))}
 
-        {loading && (
+        {loading && messages[messages.length - 1]?.content === '' && (
           <div className="chat-message assistant">
             <div style={{
               width: 26, height: 26, borderRadius: 8,

@@ -40,9 +40,26 @@ if (!loadEnv(rootEnv)) {
   console.log('[Proxy] Loaded env from shared root .env');
 }
 
-const PORT = process.env.PORT || 3000;
-const FINNHUB_KEY = process.env.FINNHUB_API_KEY || 'cs84s1pr01qlt0n9uts0cs84s1pr01qlt0n9utsg';
-const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY || 'YOUR_ANTHROPIC_KEY';
+const PORT          = process.env.PORT || 3000;
+const FINNHUB_KEY   = process.env.FINNHUB_API_KEY || '';
+const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY  || '';
+const GROQ_KEY      = process.env.GROQ_API_KEY   || '';
+const GEMINI_KEY    = process.env.GEMINI_API_KEY || '';
+const OLLAMA_URL    = process.env.OLLAMA_URL     || 'http://localhost:11434';
+const OLLAMA_MODEL  = process.env.OLLAMA_MODEL   || 'llama3';
+
+// ─── AI provider priority order (skip if key missing) ────────────────────────
+// 1. Groq   — free, 30 req/min, llama3-70b (fast)
+// 2. Gemini — free, 15 req/min, gemini-1.5-flash
+// 3. Ollama — free local inference, no limits
+// 4. Claude — paid, fallback
+const AI_PROVIDERS = [
+  { name: 'groq',   available: () => !!GROQ_KEY },
+  { name: 'gemini', available: () => !!GEMINI_KEY },
+  { name: 'ollama', available: () => true },   // always try local Ollama
+  { name: 'claude', available: () => !!ANTHROPIC_KEY && !ANTHROPIC_KEY.includes('YOUR_') },
+];
+console.log('[AI] Provider priority:', AI_PROVIDERS.filter(p => p.available()).map(p => p.name).join(' → ') || 'demo-sandbox');
 
 // ─── Simple in-memory caches ───────────────────────────────────────────────
 let livePriceCache = { data: null, fetchedAt: 0 };
@@ -294,149 +311,285 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // ── POST /ai-chat — Claude Anthropic SSE Streaming ─────────────────────
+  // ── POST /ai-chat — Multi-provider AI (Groq → Gemini → Ollama → Claude → Demo) ──
   if (req.method === 'POST' && req.url === '/ai-chat') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
       try {
-        const { question, history = [], databricksData = {} } = JSON.parse(body);
-        console.log(`[AI Chat] Request: "${question.substring(0, 50)}..."`);
+        const { message, question, history = [], context = '', symbol = 'NIFTY50', databricksData = {} } = JSON.parse(body);
+        const userText = message || question || '';
+        console.log(`[AI] "${userText.substring(0, 60)}…"`);
 
-        if (!ANTHROPIC_KEY || ANTHROPIC_KEY.includes('YOUR_ANTHROPIC_KEY')) {
-          console.warn('[AI Chat] Warning: ANTHROPIC_KEY is not set or is a placeholder. Using Sandbox fallback.');
-          res.setHeader('Content-Type', 'text/event-stream');
-          res.setHeader('Cache-Control', 'no-cache');
-          res.setHeader('Connection', 'keep-alive');
-          res.setHeader('Access-Control-Allow-Origin', '*');
+        const SYSTEM_PROMPT = `You are TradeIQ AI — an expert Indian stock market analyst specialising in NSE/BSE equity analysis, technical indicators (RSI, MACD, Bollinger Bands, EMA, VWAP, ATR), candlestick patterns, and trading psychology. You currently have context about ${symbol}. Be concise, precise, and actionable. Use ₹ for prices. Do not provide financial advice — describe what indicators suggest.`;
 
-          const q = question.toLowerCase();
-          let responseText = '';
-          if (q.includes('best month') || q.includes('2024') || q.includes('month')) {
-            responseText = `Based on historical Nifty 50 data for 2024, the best month in terms of overall performance and bullish momentum was **December 2024**, where the index gained approximately 7.2% due to robust institutional inflows and strong corporate earnings.`;
-          } else if (q.includes('how many') || q.includes('500pt') || q.includes('500')) {
-            responseText = `Analyzing the volatility in the dataset, there were exactly **3 days** in 2024 where the Nifty 50 index experienced a single-day movement exceeding **500 points**. These occurred during major policy updates and post-budget sessions.`;
-          } else if (q.includes('compare') || q.includes('q1') || q.includes('q4')) {
-            responseText = `Comparing Q1 vs Q4 of 2024:\n- **Q1 2024**: Marked by consolidation and moderate gains (+3.4% overall).\n- **Q4 2024**: Saw high volatility but ended strongly (+6.8% overall), driven by festive demand and solid FII buying.\n\nOverall, **Q4** outperformed **Q1** in terms of absolute gains and trading volume.`;
-          } else if (q.includes('worst') || q.includes('single day') || q.includes('day')) {
-            responseText = `The worst single day for the Nifty 50 in 2024 was on **June 4, 2024** (election results day), where the index plummeted by nearly **6% (about 1,379 points)** in a single trading session before staging a recovery in the subsequent weeks.`;
-          } else {
-            responseText = `Hello! I am StockIQ, your AI Market Analyst. I can help analyze Nifty 50 indicators, trends, and milestone alerts.\n\n*Note: Currently running in **Demo Sandbox Mode** since the Anthropic API key is not configured in the \`.env\` file. To get real-time dynamic AI insights, please set a valid \`ANTHROPIC_KEY\` in your \`.env\` file.*`;
-          }
+        const msgs = [
+          ...history.slice(-6).map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content || m.text || '' })),
+          { role: 'user', content: context ? `${context}\n\n${userText}` : userText },
+        ];
 
-          // Split by space and stream chunks to simulate a live typewriter effect
-          const words = responseText.split(' ');
-          let wordIndex = 0;
-
-          const interval = setInterval(() => {
-            if (wordIndex < words.length) {
-              const token = (wordIndex === 0 ? '' : ' ') + words[wordIndex];
-              res.write(`data: ${JSON.stringify({ token })}\n\n`);
-              wordIndex++;
-            } else {
-              clearInterval(interval);
-              res.write('data: [DONE]\n\n');
-              res.end();
-            }
-          }, 40);
-
-          res.on('close', () => {
-            clearInterval(interval);
-          });
-          return;
-        }
-
-        const currentSym = databricksData.symbol || 'NIFTY 50';
-        const contextMsg = `Current Databricks data context:\n${JSON.stringify(databricksData, null, 2)}\n\nUser question: ${question}`;
-
-        const recentHistory = history.slice(-6).map(m => ({
-          role: m.role === 'assistant' ? 'assistant' : 'user',
-          content: m.text || m.content || ''
-        }));
-
-        const messages = [...recentHistory, { role: 'user', content: contextMsg }];
-
-        const payload = JSON.stringify({
-          model: 'claude-3-5-sonnet-20240620',
-          max_tokens: 1024,
-          system: `You are StockIQ, an expert Nifty 50 market analyst AI. Answer concisely.`,
-          messages,
-          stream: true
-        });
-
-        // Set up SSE headers
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Connection', 'keep-alive');
-        res.setHeader('Access-Control-Allow-Origin', '*');
-
-        const opts = {
-          hostname: 'api.anthropic.com',
-          path: '/v1/messages',
-          method: 'POST',
-          headers: {
-            'x-api-key': ANTHROPIC_KEY,
-            'anthropic-version': '2023-06-01',
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(payload)
+        // ─── SSE helpers ───────────────────────────────────────────────────────
+        const sseHeaders = () => {
+          if (!res.headersSent) {
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('Access-Control-Allow-Origin', '*');
           }
         };
 
-        const claudeReq = https.request(opts, (claudeRes) => {
-          console.log(`[AI Chat] Anthropic Response Status: ${claudeRes.statusCode}`);
-          
-          if (claudeRes.statusCode !== 200) {
-            let errBuf = '';
-            claudeRes.on('data', d => { errBuf += d; });
-            claudeRes.on('end', () => {
-              console.error(`[AI Chat] Anthropic Error: ${errBuf}`);
-              res.write(`data: ${JSON.stringify({ error: `Anthropic API Error (${claudeRes.statusCode})` })}\n\n`);
+        const streamWords = (text) => {
+          sseHeaders();
+          const words = text.split(' ');
+          let i = 0;
+          const iv = setInterval(() => {
+            if (i < words.length) {
+              res.write(`data: ${JSON.stringify({ token: (i === 0 ? '' : ' ') + words[i] })}\n\n`);
+              i++;
+            } else {
+              clearInterval(iv);
               res.write('data: [DONE]\n\n');
-              res.end();
+              if (!res.writableEnded) res.end();
+            }
+          }, 35);
+          res.on('close', () => clearInterval(iv));
+        };
+
+        const streamError = (msg) => {
+          sseHeaders();
+          res.write(`data: ${JSON.stringify({ token: `⚠ ${msg}` })}\n\n`);
+          res.write('data: [DONE]\n\n');
+          if (!res.writableEnded) res.end();
+        };
+
+        // ─── 1. GROQ — free, llama3-70b-8192, 30 req/min ─────────────────────
+        if (GROQ_KEY) {
+          console.log('[AI] Trying Groq (llama3-70b-8192)...');
+          try {
+            const payload = JSON.stringify({
+              model: 'llama3-70b-8192',
+              messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...msgs],
+              max_tokens: 800,
+              stream: true,
+              temperature: 0.4,
             });
-            return;
+            sseHeaders();
+            await new Promise((resolve, reject) => {
+              const req2 = https.request({
+                hostname: 'api.groq.com',
+                path: '/openai/v1/chat/completions',
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${GROQ_KEY}`,
+                  'Content-Type': 'application/json',
+                  'Content-Length': Buffer.byteLength(payload),
+                },
+              }, (r) => {
+                if (r.statusCode === 429) { console.warn('[Groq] Rate limited, trying next...'); r.resume(); resolve('rate_limit'); return; }
+                if (r.statusCode !== 200) { let e=''; r.on('data',d=>e+=d); r.on('end',()=>{ console.warn('[Groq] Error',r.statusCode,e); resolve('error'); }); return; }
+                let buf = '';
+                r.on('data', chunk => {
+                  buf += chunk.toString();
+                  const lines = buf.split('\n'); buf = lines.pop();
+                  for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    const d = line.slice(6).trim();
+                    if (d === '[DONE]') { res.write('data: [DONE]\n\n'); continue; }
+                    try {
+                      const p = JSON.parse(d);
+                      const t = p.choices?.[0]?.delta?.content;
+                      if (t) res.write(`data: ${JSON.stringify({ token: t })}\n\n`);
+                    } catch(_){}
+                  }
+                });
+                r.on('end', () => { if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); } resolve('ok'); });
+              });
+              req2.on('error', e => { console.warn('[Groq] Network error:', e.message); resolve('error'); });
+              req2.write(payload); req2.end();
+            }).then(status => {
+              if (status === 'ok') return Promise.resolve('done');
+              return Promise.reject(new Error(status));
+            });
+            return; // success — exit
+          } catch(e) {
+            console.warn('[Groq] Failed, trying next provider:', e.message);
+            if (res.writableEnded) return;
           }
+        }
 
-          let buf = '';
-          claudeRes.on('data', chunk => {
-            buf += chunk.toString();
-            const lines = buf.split('\n');
-            buf = lines.pop(); 
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6).trim();
-                if (data === '[DONE]') { res.write('data: [DONE]\n\n'); continue; }
-                try {
-                  const parsed = JSON.parse(data);
-                  if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
-                    res.write(`data: ${JSON.stringify({ token: parsed.delta.text })}\n\n`);
-                  }
-                  if (parsed.type === 'message_stop') {
-                    res.write('data: [DONE]\n\n');
-                    res.end();
-                  }
-                } catch (_) { }
-              }
+        // ─── 2. GEMINI — free, gemini-1.5-flash, 15 req/min ──────────────────
+        if (GEMINI_KEY) {
+          console.log('[AI] Trying Gemini (gemini-1.5-flash)...');
+          try {
+            // Gemini uses REST (non-SSE), then we stream the response word-by-word
+            const geminiMsgs = msgs.map(m => ({
+              role: m.role === 'assistant' ? 'model' : 'user',
+              parts: [{ text: m.content }],
+            }));
+            const payload = JSON.stringify({
+              system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+              contents: geminiMsgs,
+              generationConfig: { maxOutputTokens: 800, temperature: 0.4 },
+            });
+            const geminiRes = await new Promise((resolve, reject) => {
+              const req2 = https.request({
+                hostname: 'generativelanguage.googleapis.com',
+                path: `/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+              }, (r) => {
+                let d = ''; r.on('data', c => d += c);
+                r.on('end', () => resolve({ status: r.statusCode, body: d }));
+              });
+              req2.on('error', reject);
+              req2.write(payload); req2.end();
+            });
+            if (geminiRes.status === 429) { console.warn('[Gemini] Rate limited, trying next...'); }
+            else if (geminiRes.status === 200) {
+              const parsed = JSON.parse(geminiRes.body);
+              const text = parsed?.candidates?.[0]?.content?.parts?.[0]?.text || 'No response';
+              console.log('[AI] Gemini OK');
+              streamWords(text);
+              return;
+            } else {
+              console.warn('[Gemini] Error', geminiRes.status, geminiRes.body.slice(0, 120));
             }
-          });
-          claudeRes.on('end', () => { 
-            if (!res.writableEnded) {
-              res.write('data: [DONE]\n\n'); 
-              res.end(); 
-            }
-          });
-        });
+          } catch(e) {
+            console.warn('[Gemini] Failed:', e.message);
+            if (res.writableEnded) return;
+          }
+        }
 
-        claudeReq.on('error', (e) => {
-          console.error('[Claude] Error:', e.message);
-          res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
-          res.end();
-        });
+        // ─── 3. OLLAMA — 100% free local, no API key needed ──────────────────
+        {
+          console.log(`[AI] Trying Ollama local (${OLLAMA_MODEL})...`);
+          try {
+            const isLocalHttps = OLLAMA_URL.startsWith('https');
+            const ollamaLib = isLocalHttps ? https : http;
+            const ollamaParsed = new URL(OLLAMA_URL);
+            const payload = JSON.stringify({
+              model: OLLAMA_MODEL,
+              messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...msgs],
+              stream: true,
+            });
+            const ollamaOk = await new Promise((resolve) => {
+              const req2 = ollamaLib.request({
+                hostname: ollamaParsed.hostname,
+                port: ollamaParsed.port || (isLocalHttps ? 443 : 80),
+                path: '/api/chat',
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+                timeout: 5000, // 5s connect timeout — fail fast if Ollama not running
+              }, (r) => {
+                if (r.statusCode !== 200) { r.resume(); resolve(false); return; }
+                sseHeaders();
+                let buf = '';
+                r.on('data', chunk => {
+                  buf += chunk.toString();
+                  const lines = buf.split('\n'); buf = lines.pop();
+                  for (const line of lines) {
+                    if (!line.trim()) continue;
+                    try {
+                      const p = JSON.parse(line);
+                      const t = p.message?.content;
+                      if (t) res.write(`data: ${JSON.stringify({ token: t })}\n\n`);
+                      if (p.done) { res.write('data: [DONE]\n\n'); if (!res.writableEnded) res.end(); }
+                    } catch(_){}
+                  }
+                });
+                r.on('end', () => { if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); } resolve(true); });
+              });
+              req2.on('error', () => resolve(false));
+              req2.on('timeout', () => { req2.destroy(); resolve(false); });
+              req2.write(payload); req2.end();
+            });
+            if (ollamaOk) { console.log('[AI] Ollama OK'); return; }
+            console.warn('[AI] Ollama not available (not running locally)');
+          } catch(e) {
+            console.warn('[Ollama] Failed:', e.message);
+            if (res.writableEnded) return;
+          }
+        }
 
-        claudeReq.write(payload);
-        claudeReq.end();
+        // ─── 4. CLAUDE — paid fallback ─────────────────────────────────────────
+        if (ANTHROPIC_KEY && !ANTHROPIC_KEY.includes('YOUR_')) {
+          console.log('[AI] Trying Claude (claude-3-haiku — cheapest tier)...');
+          try {
+            const payload = JSON.stringify({
+              model: 'claude-3-haiku-20240307', // cheapest Claude model, ~250x less than Sonnet
+              max_tokens: 600,
+              system: SYSTEM_PROMPT,
+              messages: msgs,
+              stream: true,
+            });
+            sseHeaders();
+            await new Promise((resolve) => {
+              const req2 = https.request({
+                hostname: 'api.anthropic.com',
+                path: '/v1/messages',
+                method: 'POST',
+                headers: {
+                  'x-api-key': ANTHROPIC_KEY,
+                  'anthropic-version': '2023-06-01',
+                  'Content-Type': 'application/json',
+                  'Content-Length': Buffer.byteLength(payload),
+                },
+              }, (r) => {
+                if (r.statusCode === 429) {
+                  let e=''; r.on('data',d=>e+=d); r.on('end',()=>{ console.warn('[Claude] Rate limited'); resolve('rate_limit'); });
+                  return;
+                }
+                if (r.statusCode !== 200) { let e=''; r.on('data',d=>e+=d); r.on('end',()=>{ console.warn('[Claude] Error',r.statusCode); resolve('error'); }); return; }
+                let buf = '';
+                r.on('data', chunk => {
+                  buf += chunk.toString();
+                  const lines = buf.split('\n'); buf = lines.pop();
+                  for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    const d = line.slice(6).trim();
+                    try {
+                      const p = JSON.parse(d);
+                      if (p.type === 'content_block_delta' && p.delta?.text)
+                        res.write(`data: ${JSON.stringify({ token: p.delta.text })}\n\n`);
+                      if (p.type === 'message_stop') { res.write('data: [DONE]\n\n'); if (!res.writableEnded) res.end(); }
+                    } catch(_){}
+                  }
+                });
+                r.on('end', () => { if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); } resolve('ok'); });
+              });
+              req2.on('error', e => { console.warn('[Claude] Error:', e.message); resolve('error'); });
+              req2.write(payload); req2.end();
+            });
+            if (!res.writableEnded) return;
+          } catch(e) {
+            console.warn('[Claude] Failed:', e.message);
+            if (res.writableEnded) return;
+          }
+        }
+
+        // ─── 5. DEMO SANDBOX — hardcoded Indian market Q&A ───────────────────
+        console.log('[AI] All providers unavailable — using Demo Sandbox');
+        const q = userText.toLowerCase();
+        let demoText = '';
+        if (q.includes('rsi')) {
+          demoText = `**RSI (Relative Strength Index)** measures momentum on a 0–100 scale.\n\n- **RSI < 30** → Oversold zone — potential reversal up\n- **RSI > 70** → Overbought zone — potential reversal down\n- **RSI 40–60** → Neutral / consolidation\n\nFor ${symbol}, watch for RSI divergence (price makes new high but RSI doesn't) as a leading reversal signal.`;
+        } else if (q.includes('macd')) {
+          demoText = `**MACD (Moving Average Convergence Divergence)** tracks trend changes.\n\n- **Bullish cross**: MACD line crosses above Signal line → momentum shifting up\n- **Bearish cross**: MACD crosses below Signal → momentum shifting down\n- **Histogram** expanding = strengthening trend; shrinking = weakening trend\n\nA MACD bullish cross combined with RSI < 60 gives a strong entry signal.`;
+        } else if (q.includes('bollinger') || q.includes('bb')) {
+          demoText = `**Bollinger Bands** = 20-day SMA ± 2 standard deviations.\n\n- **Price touches lower band** → potential bounce (buy zone)\n- **Price touches upper band** → potential reversal (sell zone)\n- **Squeeze** (bands narrowing) → explosive breakout imminent\n\nFor ${symbol}, a BB squeeze with rising RSI typically precedes a bullish breakout.`;
+        } else if (q.includes('stop') || q.includes('stoploss') || q.includes('stop loss')) {
+          demoText = `**Stop-Loss Strategies for ${symbol}:**\n\n1. **ATR-based**: Entry price − (1.5 × ATR14) — adapts to volatility\n2. **Swing low**: Place below the last significant low — technical S/R based\n3. **% fixed**: 1–2% below entry for intraday; 3–5% for swing trades\n\n💡 Never risk more than 1–2% of capital on a single trade. For Nifty futures, 1 lot = 50 units.`;
+        } else if (q.includes('nifty') || q.includes('index')) {
+          demoText = `**Nifty 50** is India's benchmark NSE index comprising 50 large-cap stocks across 13 sectors.\n\n**Key support/resistance levels** to watch:\n- Major S/R zones are typically round numbers (24000, 24500, 25000)\n- FII activity drives index movement — track net FII data daily\n- Nifty trades 09:15–15:30 IST, Mon–Fri\n\nUse the Indicators tab for real-time RSI, MACD, and EMA signals.`;
+        } else if (q.includes('volume') || q.includes('rvol')) {
+          demoText = `**Volume Analysis** is crucial for confirming price moves.\n\n- **RVOL > 1.5×** = above-average conviction — trust the move\n- **RVOL < 0.7×** = low participation — false breakout risk\n- **OBV rising** with price = institutional accumulation\n- **CMF > 0** = net buying pressure\n\nA price breakout on RVOL > 2× is the strongest confirmation signal.`;
+        } else {
+          demoText = `👋 I'm **TradeIQ AI** — your Indian market analysis assistant!\n\nI can help with:\n- **Technical indicators** (RSI, MACD, Bollinger Bands, EMA, ATR, VWAP)\n- **Stop-loss strategies** for NSE/BSE stocks\n- **Candlestick patterns** (Doji, Hammer, Engulfing, etc.)\n- **Market concepts** (F&O, FII/DII, RVOL, pivot points)\n\n💡 *Tip: For live AI responses, add a free **GROQ_API_KEY** or **GEMINI_API_KEY** to your .env file — both have generous free tiers!*`;
+        }
+        streamWords(demoText);
 
       } catch (err) {
+        console.error('[AI Chat] Parse error:', err.message);
         res.statusCode = 400;
         res.end(JSON.stringify({ error: err.message }));
       }
