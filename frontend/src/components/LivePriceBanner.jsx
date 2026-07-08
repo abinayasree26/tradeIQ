@@ -19,29 +19,39 @@ export default function LivePriceBanner({ symbol, theme, onPriceUpdate }) {
       const res = await fetch(CONFIG.STAP.QUOTE(symbol));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      setQuote(data);
+      
+      // Standardize python keys to what frontend expects
+      const normalizedData = {
+        ...data,
+        change_percent: data.pct_change ?? data.change_percent,
+        market_open: data.is_market_open ?? data.market_open,
+        '52w_low': data.fifty_two_week_low ?? data['52w_low'],
+        '52w_high': data.fifty_two_week_high ?? data['52w_high'],
+      };
+      
+      setQuote(normalizedData);
       setLoading(false);
 
       if (onPriceUpdate) {
         onPriceUpdate({
-          price: data.price,
-          change: data.change,
-          changePercent: data.change_percent,
-          isMarketOpen: data.market_open,
+          price: normalizedData.price,
+          change: normalizedData.change,
+          changePercent: normalizedData.change_percent,
+          isMarketOpen: normalizedData.market_open,
         });
       }
 
       // Flash animation
       if (prevPrice.current !== null) {
-        if (data.price > prevPrice.current) {
+        if (normalizedData.price > prevPrice.current) {
           setFlash('up');
           setTimeout(() => setFlash(''), 600);
-        } else if (data.price < prevPrice.current) {
+        } else if (normalizedData.price < prevPrice.current) {
           setFlash('down');
           setTimeout(() => setFlash(''), 600);
         }
       }
-      prevPrice.current = data.price;
+      prevPrice.current = normalizedData.price;
     } catch {
       setLoading(false);
     }

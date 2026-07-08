@@ -128,7 +128,7 @@ export default function App() {
           ]);
         } else throw new Error('Use live API');
       } catch {
-        const res = await fetch(`${CONFIG.ENDPOINTS.HISTORICAL}?symbol=${encodeURIComponent(selectedSymbol)}`);
+        const res = await fetch(CONFIG.STAP.OHLCV(selectedSymbol));
         dailyRes = await res.json();
         const last = dailyRes[dailyRes.length - 1] || {};
         kpiRes = [{ avg_open: parseFloat(last.open) || 0, avg_close: parseFloat(last.close) || 0, avg_day_range: (parseFloat(last.high) - parseFloat(last.low)) || 0 }];

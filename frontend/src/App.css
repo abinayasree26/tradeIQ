@@ -4,15 +4,14 @@
 
 /* ─── DARK THEME (default) ────────────────────────────────────────────────── */
 :root {
-  /* Core backgrounds */
-  --bg-base:       #060609;
-  --bg-elevated:   #0d0d12;
-  --bg-surface:    #111118;
-  --bg-overlay:    #15151e;
-  --bg-sidebar:    #0a0a10;
+  --bg-base:       #08080c;
+  --bg-elevated:   #0d0d14;
+  --bg-surface:    #12121a;
+  --bg-overlay:    #161622;
+  --bg-sidebar:    #08080c;
   --bg-card:       rgba(255, 255, 255, 0.035);
   --bg-card-hover: rgba(255, 255, 255, 0.065);
-  --bg-glass:      rgba(13, 13, 18, 0.75);
+  --bg-glass:      rgba(8, 8, 12, 0.75);
   --bg-input:      rgba(255, 255, 255, 0.05);
 
   /* Borders */
@@ -1156,7 +1155,7 @@
   bottom: 88px;
   right: 24px;
   width: 400px;
-  height: 580px;
+  height: min(580px, calc(100vh - 120px));
   background: var(--bg-elevated);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-xl);
