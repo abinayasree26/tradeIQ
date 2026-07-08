@@ -1,4 +1,9 @@
+from pathlib import Path
 from pydantic_settings import BaseSettings
+
+# Resolve the absolute path of the workspace root .env file
+# config.py is at: <root>/backend-python/app/core/config.py
+BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
 
 
 class Settings(BaseSettings):
@@ -68,8 +73,22 @@ class Settings(BaseSettings):
     DATABRICKS_TOKEN: str = ""
     DATABRICKS_WAREHOUSE_ID: str = ""
 
+    # Twelve Data Key (used by Node proxy — kept here for schema completeness)
+    TWELVE_DATA_KEY: str = ""
+
+    # Node Proxy Port (used by Node proxy — kept here for schema completeness)
+    PORT: int = 3000
+
     class Config:
-        env_file = ".env"
+        # Load from the shared root .env first; fall back to relative paths
+        # so that starting from anywhere inside the project works.
+        env_file = (
+            str(BASE_DIR / ".env"),
+            "../.env",
+            ".env",
+            "../../.env"
+        )
+        env_file_encoding = "utf-8"
         extra = "ignore"
 
 

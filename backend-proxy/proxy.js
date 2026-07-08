@@ -3,20 +3,41 @@ import https from 'https';
 import fs from 'fs';
 import path from 'path';
 
-// ─── Simple manual .env loading (since we want minimum dependencies) ────────
-try {
-  const envPath = path.resolve(process.cwd(), '.env');
-  if (fs.existsSync(envPath)) {
-    const env = fs.readFileSync(envPath, 'utf8');
-    env.split('\n').forEach(line => {
-      const parts = line.split('=');
-      if (parts.length === 2) {
-        process.env[parts[0].trim()] = parts[1].trim();
+// ─── Shared .env loader ──────────────────────────────────────────────────────
+// Tries root ../.env first (shared), then a local .env as fallback.
+// Values containing '=' are handled correctly (split on first '=' only).
+// Lines starting with '#' and blank lines are skipped.
+function loadEnv(envPath) {
+  if (!fs.existsSync(envPath)) return false;
+  try {
+    const lines = fs.readFileSync(envPath, 'utf8').split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx < 1) continue;
+      const key = trimmed.slice(0, eqIdx).trim();
+      const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
+      if (key && !(key in process.env)) {
+        process.env[key] = val;
       }
-    });
+    }
+    return true;
+  } catch (e) {
+    console.warn(`[Proxy] Could not parse ${envPath}:`, e.message);
+    return false;
   }
-} catch (e) {
-  console.warn('[Proxy] Failed to load .env file:', e.message);
+}
+
+const __dir    = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1'));
+const rootEnv  = path.resolve(__dir, '../.env');
+const localEnv = path.resolve(__dir, '.env');
+
+if (!loadEnv(rootEnv)) {
+  loadEnv(localEnv);
+  console.log('[Proxy] Loaded env from local .env (root .env not found)');
+} else {
+  console.log('[Proxy] Loaded env from shared root .env');
 }
 
 const PORT = process.env.PORT || 3000;

@@ -14,9 +14,13 @@ build/
 .mypy_cache/
 
 # ── Environment / secrets — NEVER commit these ────────────────
+# Ignore all .env files at any depth
 .env
+**/.env
 *.env
+# Allow example templates (safe to commit)
 !.env.example
+!**/.env.example
 
 # ── Node ──────────────────────────────────────────────────────
 node_modules/

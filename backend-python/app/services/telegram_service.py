@@ -12,7 +12,6 @@ No Telegram library dependency — uses raw HTTP so it works anywhere.
 """
 
 from __future__ import annotations
-import os
 import asyncio
 from typing import Optional
 
@@ -20,8 +19,11 @@ import httpx
 
 from app.utils.logger import logger
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
+from app.core.config import settings
+
+# Read from shared settings (loaded from root .env via Pydantic Settings)
+TELEGRAM_BOT_TOKEN = settings.TELEGRAM_BOT_TOKEN
+TELEGRAM_CHAT_ID   = settings.TELEGRAM_CHAT_ID
 TELEGRAM_API_BASE  = "https://api.telegram.org"
 
 

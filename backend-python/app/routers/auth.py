@@ -88,6 +88,14 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     )
 
 
+@router.post("/signup", response_model=LoginResponse, status_code=201)
+async def signup(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Alias for register endpoint.
+    """
+    return await register(body, db)
+
+
 # ─── Login ────────────────────────────────────────────────────────────────────
 
 @router.post("/login", response_model=LoginResponse)

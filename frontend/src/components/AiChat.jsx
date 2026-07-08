@@ -1,183 +1,203 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Send, X, Bot, User, Sparkles, MessageSquare, Trash2, Cpu } from 'lucide-react';
+/**
+ * AiChat.jsx — Claude AI Trading Assistant
+ * Floating chat window with markdown-lite rendering and quick prompts.
+ */
+import { useState, useRef, useEffect } from 'react';
+import { Send, X, Bot, User, Sparkles, RefreshCw, Zap } from 'lucide-react';
 import { CONFIG } from '../config';
 
-const AiChat = ({ isOpen, onClose, databricksData, selectedSymbol }) => {
-  const [userInput, setUserInput] = useState('');
-  const [chatHistory, setChatHistory] = useState([
-    { role: 'assistant', content: `Hi! I am your TradeIQ AI. Ask me anything about ${selectedSymbol || 'Nifty 50'}.` }
+const SUGGESTIONS = [
+  'What is the current RSI signal?',
+  'Explain the MACD crossover',
+  'Best stop-loss strategy for RELIANCE?',
+  'What does Bollinger Band squeeze mean?',
+  'Explain volume analysis for today',
+];
+
+function renderMarkdown(text) {
+  // Simple markdown-lite renderer
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/`(.*?)`/g, '<code style="background:rgba(99,102,241,0.15);padding:1px 5px;border-radius:4px;font-family:monospace;font-size:0.88em">$1</code>')
+    .replace(/\n/g, '<br/>');
+}
+
+export default function AiChat({ isOpen, onClose, selectedSymbol, databricksData }) {
+  const [messages, setMessages] = useState([
+    {
+      role: 'assistant',
+      content: `👋 Hi! I'm your TradeIQ AI assistant powered by Claude.\n\nI can help you understand technical indicators, interpret signals, and explain trading concepts for **${selectedSymbol}**.\n\nWhat would you like to know?`,
+    },
   ]);
-  
-  useEffect(() => {
-    if (chatHistory.length === 1) {
-      setChatHistory([{ role: 'assistant', content: `Hi! I am your TradeIQ AI. Ask me anything about ${selectedSymbol || 'Nifty 50'}.` }]);
-    }
-  }, [selectedSymbol]);
-  const [isTyping, setIsTyping] = useState(false);
-  const messagesEndRef = useRef(null);
-  const streamRef = useRef('');
+  const [input, setInput]     = useState('');
+  const [loading, setLoading] = useState(false);
+  const messagesEndRef         = useRef(null);
+  const inputRef               = useRef(null);
 
-  const scrollToBottom = () => {
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  }, [messages]);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [chatHistory, isTyping]);
+    if (isOpen) setTimeout(() => inputRef.current?.focus(), 100);
+  }, [isOpen]);
 
-  const SUGGESTED_QUESTIONS = [
-    "Best month in 2024?",
-    "How many 500pt days?",
-    "Compare Q1 vs Q4",
-    "Worst single day?"
-  ];
+  const sendMessage = async (text) => {
+    const userText = text || input.trim();
+    if (!userText || loading) return;
 
-  const handleSendMessage = async (e, text = null) => {
-    if (e) e.preventDefault();
-    const query = text || userInput;
-    if (!query.trim() || isTyping) return;
-
-    const newUserMessage = { role: 'user', content: query };
-    const updatedHistory = [...chatHistory, newUserMessage].slice(-20); // Keep last 20 messages
-    setChatHistory(updatedHistory);
-    setUserInput('');
-    setIsTyping(true);
-    streamRef.current = '';
+    setMessages(m => [...m, { role: 'user', content: userText }]);
+    setInput('');
+    setLoading(true);
 
     try {
-      const response = await fetch(CONFIG.ENDPOINTS.AI_CHAT, {
+      const contextStr = databricksData
+        ? `Context for ${databricksData.symbol}:\n- Avg Open: ${databricksData.summary?.avg_open}\n- Avg Close: ${databricksData.summary?.avg_close}\n- Recent data points: ${databricksData.recent?.length}`
+        : '';
+
+      const res = await fetch(CONFIG.ENDPOINTS.AI_CHAT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          question: query,
-          history: updatedHistory,
-          databricksData
-        })
+          message: userText,
+          symbol:  selectedSymbol,
+          context: contextStr,
+          history: messages.slice(-6).map(m => ({ role: m.role, content: m.content })),
+        }),
       });
 
-      if (!response.ok) throw new Error('AI Server error');
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      
-      const assistantMessage = { role: 'assistant', content: '' };
-      setChatHistory(prev => [...prev, assistantMessage]);
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
-        
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6).trim();
-            if (data === '[DONE]') continue;
-            
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.token) {
-                streamRef.current += parsed.token;
-                setChatHistory(prev => {
-                  const last = prev[prev.length - 1];
-                  const others = prev.slice(0, -1);
-                  return [...others, { ...last, content: streamRef.current }];
-                });
-              }
-              if (parsed.error) {
-                setChatHistory(prev => [...prev, { role: 'assistant', content: `Error: ${parsed.error}` }]);
-              }
-            } catch (e) { /* skip */ }
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Chat error:', err);
-      setChatHistory(prev => [...prev, { role: 'assistant', content: "Sorry, I encountered an error connecting to the AI." }]);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const reply = data.response || data.message || data.content || 'Sorry, I could not generate a response.';
+      setMessages(m => [...m, { role: 'assistant', content: reply }]);
+    } catch (e) {
+      setMessages(m => [...m, {
+        role: 'assistant',
+        content: `⚠️ I couldn't connect to the AI service right now.\n\nEnsure the Node proxy is running on port 3000 with a valid Anthropic API key.\n\nError: ${e.message}`,
+      }]);
     } finally {
-      setIsTyping(false);
+      setLoading(false);
     }
   };
 
-  const clearChat = () => {
-    setChatHistory([{ role: 'assistant', content: 'Chat history cleared. How can I help you today?' }]);
+  const handleKey = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
 
-  if (!isOpen) return (
-    <button className="chat-trigger" onClick={onClose}>
-      <Sparkles size={24} /> <span>Ask AI</span>
-    </button>
-  );
+  const clearChat = () => {
+    setMessages([{
+      role: 'assistant',
+      content: `Chat cleared. Ask me anything about **${selectedSymbol}** or Indian markets.`,
+    }]);
+  };
+
+  if (!isOpen) return null;
 
   return (
     <div className="chat-window">
+      {/* Header */}
       <div className="chat-header">
-        <div className="bot-info">
-          <div className="bot-avatar"><Bot size={18} /></div>
-          <div>
-            <h4>TradeIQ AI</h4>
-            <div className="status-row">
-              <span className="pulse-dot"></span>
-              <p className="status">Powered by Claude</p>
-            </div>
+        <div className="chat-bot-avatar">
+          <Bot size={18} />
+        </div>
+        <div>
+          <div className="chat-title">TradeIQ AI</div>
+          <div className="chat-subtitle" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <div className="status-dot live" />
+            Claude · {selectedSymbol}
           </div>
         </div>
-        <div className="chat-actions">
-          <button className="icon-action" onClick={clearChat} title="Clear Chat"><Trash2 size={16} /></button>
-          <button className="close-chat" onClick={onClose}><X size={18} /></button>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          <button
+            onClick={clearChat}
+            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 5, borderRadius: 7, display: 'flex' }}
+            title="Clear chat"
+          >
+            <RefreshCw size={14} />
+          </button>
+          <button className="chat-close" onClick={onClose}>
+            <X size={15} />
+          </button>
         </div>
       </div>
 
+      {/* Messages */}
       <div className="chat-messages">
-        {chatHistory.map((msg, idx) => (
-          <div key={idx} className={`message-wrap ${msg.role}`}>
-            <div className="avatar-small">
-              {msg.role === 'assistant' ? <Bot size={12} /> : <User size={12} />}
+        {messages.map((msg, i) => (
+          <div key={i} className={`chat-message ${msg.role}`}>
+            <div style={{
+              width: 26, height: 26, borderRadius: msg.role === 'user' ? 7 : 8,
+              background: msg.role === 'user' ? 'var(--accent)' : 'var(--bg-overlay)',
+              border: msg.role === 'assistant' ? '1px solid var(--border)' : 'none',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0, color: msg.role === 'user' ? 'white' : 'var(--accent-light)',
+            }}>
+              {msg.role === 'user' ? <User size={13} /> : <Sparkles size={13} />}
             </div>
-            <div className="message">
-              {msg.content}
+            <div className="chat-bubble">
+              <span dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
             </div>
           </div>
         ))}
-        {isTyping && !streamRef.current && (
-          <div className="message-wrap assistant">
-            <div className="avatar-small"><Bot size={12} /></div>
-            <div className="message typing">
-              <span></span><span></span><span></span>
+
+        {loading && (
+          <div className="chat-message assistant">
+            <div style={{
+              width: 26, height: 26, borderRadius: 8,
+              background: 'var(--bg-overlay)', border: '1px solid var(--border)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'var(--accent-light)', flexShrink: 0,
+            }}>
+              <Sparkles size={13} />
+            </div>
+            <div className="chat-bubble" style={{ background: 'var(--bg-overlay)', border: '1px solid var(--border)' }}>
+              <div className="typing-dots">
+                <span /><span /><span />
+              </div>
             </div>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {chatHistory.length <= 1 && (
-        <div className="suggested-row">
-          {SUGGESTED_QUESTIONS.map((q, i) => (
-            <button key={i} className="suggested-chip" onClick={() => handleSendMessage(null, q)}>
-              {q}
+      {/* Quick suggestions (only if 1 message) */}
+      {messages.length <= 1 && (
+        <div className="chat-chips">
+          {SUGGESTIONS.slice(0, 3).map((s, i) => (
+            <button key={i} className="chat-chip" onClick={() => sendMessage(s)}>
+              <Zap size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 3 }} />
+              {s}
             </button>
           ))}
         </div>
       )}
 
-      <form className="chat-input" onSubmit={handleSendMessage}>
-        <input 
-          type="text" 
-          placeholder="Ask me anything..." 
-          value={userInput} 
-          onChange={(e) => setUserInput(e.target.value)}
+      {/* Input */}
+      <div className="chat-input-bar">
+        <input
+          ref={inputRef}
+          type="text"
+          placeholder={`Ask about ${selectedSymbol}…`}
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={handleKey}
+          disabled={loading}
         />
-        <button type="submit" disabled={!userInput.trim() || isTyping}>
-          <Send size={18} />
+        <button
+          className="chat-send"
+          onClick={() => sendMessage()}
+          disabled={!input.trim() || loading}
+          title="Send (Enter)"
+        >
+          <Send size={15} />
         </button>
-      </form>
-      <div className="chat-footer">
-        <Cpu size={12} />
-        <span>Claude 3.5 Sonnet Integration</span>
+      </div>
+
+      {/* Footer */}
+      <div style={{ padding: '4px 16px 10px', fontSize: '0.6rem', color: 'var(--text-muted)', textAlign: 'center', letterSpacing: '0.04em' }}>
+        Powered by Anthropic Claude · Not financial advice
       </div>
     </div>
   );
-};
-
-export default AiChat;
+}

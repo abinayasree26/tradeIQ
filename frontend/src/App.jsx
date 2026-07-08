@@ -1,14 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  TrendingUp, Activity, Calendar, Info,
-  Search, Bell, Settings, LayoutDashboard, Database,
-  ArrowUpRight, ArrowDownLeft, Target, Send, X, Bot, Sparkles, User,
-  FileText, Clock, RefreshCw, BarChart3, Moon, Sun, Plus, Trash, Filter
+  TrendingUp, Activity, Info, Search, Bell, Settings,
+  LayoutDashboard, Database, ArrowUpRight, ArrowDownLeft,
+  Target, Sun, Moon, Plus, Filter, RefreshCw, BarChart3,
+  Sparkles, FileText, Clock, Zap, MessageSquare, ChevronRight,
+  User, CreditCard, Bot
 } from 'lucide-react';
-import './App.css'
+import './App.css';
 import { executeQuery, TABLES } from './services/databricks';
-
-// New Components
 import LivePriceBanner from './components/LivePriceBanner';
 import NewsPanel from './components/NewsPanel';
 import AiChat from './components/AiChat';
@@ -19,741 +18,774 @@ import { useThresholdAlerts } from './services/useThresholdAlerts';
 import IndicatorPanel from './components/IndicatorPanel';
 import MilestoneAlerts from './components/MilestoneAlerts';
 import PatternPanel from './components/PatternPanel';
+import SentimentPanel from './components/SentimentPanel';
+
+/* ─── helpers ─────────────────────────────────────────────────────────────── */
+const fmtNum = (n) => {
+  if (n == null || isNaN(Number(n))) return '—';
+  return Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+};
 
 const LOADING_STATE = {
   kpi: { avg_open: null, avg_close: null, avg_day_range: null },
   monthly: [],
   daily: [],
   loading: true,
-  error: null
+  error: null,
 };
 
-const formatNum = (n) => {
-  if (n == null || isNaN(Number(n))) return '...';
-  return Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
-};
+/* ─── NAV config ──────────────────────────────────────────────────────────── */
+const NAV = [
+  { id: 'dashboard',  label: 'Analytics',    icon: LayoutDashboard, group: 'main' },
+  { id: 'data',       label: 'Market Data',  icon: Database,        group: 'main' },
+  { id: 'news',       label: 'News Feed',    icon: FileText,        group: 'main' },
+  { id: 'signals',    label: 'Signals',      icon: Activity,        group: 'analysis' },
+  { id: 'patterns',   label: 'Patterns',     icon: Sparkles,        group: 'analysis' },
+  { id: 'sentiment',  label: 'Sentiment',    icon: MessageSquare,   group: 'analysis', badge: 'AI' },
+  { id: 'alerts',     label: 'Alerts',       icon: Bell,            group: 'tools' },
+  { id: 'historical', label: 'Aggregations', icon: BarChart3,       group: 'tools' },
+  { id: 'settings',   label: 'Settings',     icon: Settings,        group: 'account' },
+];
 
-function App() {
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [data, setData] = useState(LOADING_STATE);
-  const [livePrice, setLivePrice] = useState({ price: 0, change: 0, changePercent: 0 });
+const NAV_GROUPS = [
+  { id: 'main',     label: 'Overview' },
+  { id: 'analysis', label: 'Analysis' },
+  { id: 'tools',    label: 'Tools' },
+  { id: 'account',  label: 'Account' },
+];
 
-  const { ToastContainer } = useThresholdAlerts(
-    livePrice.price, 
-    livePrice.price - livePrice.change
-  );
-
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [theme, setTheme] = useState(localStorage.getItem('tradeiq-theme') || 'dark');
-  const [selectedSymbol, setSelectedSymbol] = useState('NIFTY 50');
-  const [watchlist, setWatchlist] = useState(() => {
-    const saved = localStorage.getItem('tradeiq-watchlist');
-    return saved ? JSON.parse(saved) : ['NIFTY 50', 'BANKNIFTY', 'RELIANCE'];
-  });
+/* ═══════════════════════════════════════════════════════════════════════════
+   APP
+   ═══════════════════════════════════════════════════════════════════════════ */
+export default function App() {
+  const [activeTab, setActiveTab]     = useState('dashboard');
+  const [data, setData]               = useState(LOADING_STATE);
+  const [livePrice, setLivePrice]     = useState({ price: 0, change: 0, changePercent: 0, isMarketOpen: false });
+  const [isChatOpen, setIsChatOpen]   = useState(false);
+  const [theme, setTheme]             = useState(localStorage.getItem('tradeiq-theme') || 'dark');
+  const [selectedSymbol, setSelectedSymbol] = useState('NIFTY50');
   const [searchQuery, setSearchQuery] = useState('');
-  const [showSearchResults, setShowSearchResults] = useState(false);
-  const [user, setUser] = useState(() => {
-    const saved = localStorage.getItem('tradeiq-user');
-    return saved ? JSON.parse(saved) : null;
-  });
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [showSearch, setShowSearch]   = useState(false);
+  const [notificationsEnabled]        = useState(true);
+  const [activeTimeframe, setActiveTimeframe] = useState('1D');
+  const searchRef = useRef(null);
 
+  /* auth */
+  const [user, setUser]               = useState(() => {
+    const s = localStorage.getItem('tradeiq-user');
+    return s ? JSON.parse(s) : null;
+  });
+  const [authTab, setAuthTab]         = useState('login');
+  const [authEmail, setAuthEmail]     = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authName, setAuthName]       = useState('');
+  const [authError, setAuthError]     = useState(null);
+  const [authLoading, setAuthLoading] = useState(false);
+
+  const { ToastContainer } = useThresholdAlerts(livePrice.price, livePrice.price - livePrice.change);
+
+  /* ─── theme ─────────────────────────────────────────────────────────────── */
   useEffect(() => {
     localStorage.setItem('tradeiq-theme', theme);
     document.documentElement.className = theme === 'light' ? 'light-mode' : '';
   }, [theme]);
+
+  /* ─── watchlist ─────────────────────────────────────────────────────────── */
+  const [watchlist, setWatchlist] = useState(() => {
+    const s = localStorage.getItem('tradeiq-watchlist');
+    return s ? JSON.parse(s) : ['NIFTY50', 'BANKNIFTY', 'RELIANCE', 'TCS', 'HDFCBANK'];
+  });
 
   useEffect(() => {
     localStorage.setItem('tradeiq-watchlist', JSON.stringify(watchlist));
   }, [watchlist]);
 
   useEffect(() => {
-    if (user) {
-      localStorage.setItem('tradeiq-user', JSON.stringify(user));
-    } else {
-      localStorage.removeItem('tradeiq-user');
-    }
+    if (user) localStorage.setItem('tradeiq-user', JSON.stringify(user));
+    else localStorage.removeItem('tradeiq-user');
   }, [user]);
 
-  const handleGoogleSignIn = () => {
-    // Mock Google Sign-In
-    const mockUser = {
-      name: 'Admin Developer',
-      email: 'admin@tradeiq.io',
-      avatar: 'AD',
-      lastLogin: new Date().toLocaleString()
-    };
-    setUser(mockUser);
-  };
-
-  const handleLogout = () => {
-    setUser(null);
-    setActiveTab('dashboard');
-  };
-
-  const STOCKS = INDIA_SYMBOLS.map(s => ({ symbol: s.symbol, name: s.name }));
-
-  const toggleTheme = () => {
-    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
-  };
-
+  /* ─── close search on outside click ─────────────────────────────────────── */
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        let kpiRes, monthlyRes, dailyRes;
-
-        try {
-          if (selectedSymbol === 'NIFTY 50') {
-            [kpiRes, monthlyRes, dailyRes] = await Promise.all([
-              executeQuery(`SELECT avg_open, avg_close, avg_day_range, open_above_prev_close_200_count, close_above_prev_close_500_count, close_below_prev_close_500_count FROM ${TABLES.summary} LIMIT 1`),
-              executeQuery(`SELECT year_month, avg_open, avg_close, avg_day_range FROM ${TABLES.monthlySummary} ORDER BY year_month ASC`),
-              executeQuery(`SELECT trade_date as time, open, high, low, close FROM ${TABLES.dailyPrices} ORDER BY trade_date ASC`)
-            ]);
-          } else {
-            throw new Error("Use Live API for non-Nifty symbols");
-          }
-        } catch (dbErr) {
-          console.warn("Databricks query failed, falling back to Live API:", dbErr);
-          const res = await fetch(`${CONFIG.ENDPOINTS.HISTORICAL}?symbol=${encodeURIComponent(selectedSymbol)}`);
-          dailyRes = await res.json();
-          const last = dailyRes[dailyRes.length - 1] || {};
-          kpiRes = [{
-            avg_open: parseFloat(last.open) || 0,
-            avg_close: parseFloat(last.close) || 0,
-            avg_day_range: (parseFloat(last.high) - parseFloat(last.low)) || 0,
-            open_above_prev_close_200_count: 0,
-            close_above_prev_close_500_count: 0,
-            close_below_prev_close_500_count: 0
-          }];
-          monthlyRes = [];
-        }
-
-        setData({
-          kpi: {
-            avg_open: kpiRes?.[0]?.avg_open,
-            avg_close: kpiRes?.[0]?.avg_close,
-            avg_day_range: kpiRes?.[0]?.avg_day_range,
-            open_above_200: kpiRes?.[0]?.open_above_prev_close_200_count,
-            close_above_500: kpiRes?.[0]?.close_above_prev_close_500_count,
-            close_below_500: kpiRes?.[0]?.close_below_prev_close_500_count,
-          },
-          monthly: monthlyRes?.map(r => ({
-            month: r.year_month,
-            avgOpen: parseFloat(r.avg_open) || 0,
-            avgClose: parseFloat(r.avg_close) || 0,
-            avgRange: parseFloat(r.avg_day_range) || 0
-          })) || [],
-          daily: dailyRes || [],
-          loading: false,
-          error: null
-        });
-
-        // Set baseline for alerts from previous day close
-      } catch (err) {
-        console.error("Dashboard load error:", err);
-        setData(s => ({ ...s, loading: false, error: err.message }));
-      }
+    const handler = (e) => {
+      if (searchRef.current && !searchRef.current.contains(e.target)) setShowSearch(false);
     };
-    loadData();
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  /* ─── data fetch ─────────────────────────────────────────────────────────── */
+  const loadData = useCallback(async () => {
+    setData(s => ({ ...s, loading: true, error: null }));
+    try {
+      let kpiRes, monthlyRes, dailyRes;
+      try {
+        if (selectedSymbol === 'NIFTY50' || selectedSymbol === 'NIFTY 50') {
+          [kpiRes, monthlyRes, dailyRes] = await Promise.all([
+            executeQuery(`SELECT avg_open, avg_close, avg_day_range, open_above_prev_close_200_count, close_above_prev_close_500_count, close_below_prev_close_500_count FROM ${TABLES.summary} LIMIT 1`),
+            executeQuery(`SELECT year_month, avg_open, avg_close, avg_day_range FROM ${TABLES.monthlySummary} ORDER BY year_month ASC`),
+            executeQuery(`SELECT trade_date as time, open, high, low, close FROM ${TABLES.dailyPrices} ORDER BY trade_date ASC`),
+          ]);
+        } else throw new Error('Use live API');
+      } catch {
+        const res = await fetch(`${CONFIG.ENDPOINTS.HISTORICAL}?symbol=${encodeURIComponent(selectedSymbol)}`);
+        dailyRes = await res.json();
+        const last = dailyRes[dailyRes.length - 1] || {};
+        kpiRes = [{ avg_open: parseFloat(last.open) || 0, avg_close: parseFloat(last.close) || 0, avg_day_range: (parseFloat(last.high) - parseFloat(last.low)) || 0 }];
+        monthlyRes = [];
+      }
+      setData({
+        kpi: {
+          avg_open: kpiRes?.[0]?.avg_open,
+          avg_close: kpiRes?.[0]?.avg_close,
+          avg_day_range: kpiRes?.[0]?.avg_day_range,
+          open_above_200: kpiRes?.[0]?.open_above_prev_close_200_count,
+          close_above_500: kpiRes?.[0]?.close_above_prev_close_500_count,
+          close_below_500: kpiRes?.[0]?.close_below_prev_close_500_count,
+        },
+        monthly: monthlyRes?.map(r => ({ month: r.year_month, avgOpen: parseFloat(r.avg_open) || 0, avgClose: parseFloat(r.avg_close) || 0, avgRange: parseFloat(r.avg_day_range) || 0 })) || [],
+        daily: dailyRes || [],
+        loading: false,
+        error: null,
+      });
+    } catch (err) {
+      setData(s => ({ ...s, loading: false, error: err.message }));
+    }
   }, [selectedSymbol]);
 
-  const renderNewsTab = () => (
-    <div className="dashboard-content">
-      <div className="welcome">
+  useEffect(() => { loadData(); }, [loadData]);
+
+  /* ─── auth ───────────────────────────────────────────────────────────────── */
+  const handleLogin = async (e) => {
+    e?.preventDefault();
+    if (!authEmail || !authPassword) { setAuthError('Email and password required'); return; }
+    setAuthError(null); setAuthLoading(true);
+    try {
+      const params = new URLSearchParams({ username: authEmail, password: authPassword });
+      const res = await fetch(CONFIG.STAP.AUTH_LOGIN, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString() });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || 'Login failed');
+      const initials = d.user.name.split(' ').filter(Boolean).map(n => n[0]).join('').toUpperCase().slice(0, 2);
+      localStorage.setItem('tradeiq-token', d.access_token);
+      setUser({ name: d.user.name, email: d.user.email, avatar: initials || 'US', lastLogin: new Date().toLocaleString() });
+      setAuthEmail(''); setAuthPassword('');
+    } catch (err) { setAuthError(err.message); }
+    finally { setAuthLoading(false); }
+  };
+
+  const handleSignup = async (e) => {
+    e?.preventDefault();
+    if (!authEmail || !authPassword || !authName) { setAuthError('All fields required'); return; }
+    if (authPassword.length < 8) { setAuthError('Password must be at least 8 characters'); return; }
+    setAuthError(null); setAuthLoading(true);
+    try {
+      const signupUrl = CONFIG.STAP.AUTH_REGISTER.replace('/register', '/signup');
+      const res = await fetch(signupUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: authEmail, password: authPassword, name: authName }) });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || 'Signup failed');
+      const initials = d.user.name.split(' ').filter(Boolean).map(n => n[0]).join('').toUpperCase().slice(0, 2);
+      localStorage.setItem('tradeiq-token', d.access_token);
+      setUser({ name: d.user.name, email: d.user.email, avatar: initials || 'US', lastLogin: new Date().toLocaleString() });
+      setAuthEmail(''); setAuthPassword(''); setAuthName('');
+    } catch (err) { setAuthError(err.message); }
+    finally { setAuthLoading(false); }
+  };
+
+  const handleLogout = () => { localStorage.removeItem('tradeiq-token'); setUser(null); setActiveTab('dashboard'); };
+
+  /* ─── symbol selection ───────────────────────────────────────────────────── */
+  const selectSymbol = (sym) => {
+    setSelectedSymbol(sym);
+    setSearchQuery('');
+    setShowSearch(false);
+  };
+
+  const filteredSymbols = INDIA_SYMBOLS.filter(s =>
+    s.symbol.includes(searchQuery.toUpperCase()) || s.name.toLowerCase().includes(searchQuery.toLowerCase())
+  ).slice(0, 8);
+
+  /* ─── RENDERS ────────────────────────────────────────────────────────────── */
+
+  const renderDashboard = () => (
+    <div className="fade-in" style={{ animation: 'fadeIn 0.4s ease' }}>
+      {/* Header */}
+      <div className="page-header">
         <div>
-          <h1>Market Intelligence Feed</h1>
-          <p>Real-time sector news and sentiment analysis</p>
+          <h1 className="page-title">Strategic Analytics</h1>
+          <p className="page-subtitle">
+            <span className="status-dot live" style={{ display: 'inline-block', marginRight: 6, verticalAlign: 'middle' }} />
+            {selectedSymbol} · Real-time Intelligence
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', background: 'var(--bg-card)', border: '1px solid var(--border)', padding: '5px 12px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <RefreshCw size={12} /> Syncing live
+          </div>
+          <button className="btn btn-primary btn-sm" onClick={loadData}>
+            <RefreshCw size={13} /> Refresh
+          </button>
         </div>
       </div>
-      <div className="news-tab-container">
-        <NewsPanel isFullPage={true} />
+
+      {/* KPI row */}
+      <div className="kpi-grid">
+        {[
+          { label: 'Yearly Avg Open', val: data.kpi?.avg_open, trend: '+2.4%', dir: 'up', icon: <TrendingUp size={14} />, insight: 'Ascending phase', color: 'var(--accent)' },
+          { label: 'Yearly Avg Close', val: data.kpi?.avg_close, trend: '+1.8%', dir: 'up', icon: <Activity size={14} />, insight: 'Stable distribution', color: 'var(--bullish)' },
+          { label: 'Volatility Range', val: data.kpi?.avg_day_range, trend: '-0.3%', dir: 'down', icon: <BarChart3 size={14} />, insight: 'Contracting band', color: 'var(--warning)' },
+        ].map((k, i) => (
+          <div key={i} className="card kpi-card">
+            <div className="kpi-label" style={{ color: k.color }}>
+              {k.icon} {k.label}
+            </div>
+            <div className="kpi-value">
+              {data.loading ? <div className="skel" style={{ width: '60%', height: 28 }} /> : fmtNum(k.val)}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span className={`kpi-trend ${k.dir}`}>{k.trend}</span>
+              <span className="kpi-insight">{k.insight}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Chart */}
+      <div className="chart-section">
+        <div className="chart-card">
+          <div className="chart-card-header">
+            <div>
+              <div className="chart-title">Advanced Price Action</div>
+              <div className="chart-subtitle">OHLC candlestick · {selectedSymbol}</div>
+            </div>
+            <div className="timeframe-btns">
+              {['1D', '1W', '1M', '3M', '1Y', 'ALL'].map(t => (
+                <button key={t} className={`tf-btn ${activeTimeframe === t ? 'active' : ''}`} onClick={() => setActiveTimeframe(t)}>{t}</button>
+              ))}
+            </div>
+          </div>
+          <CandlestickChart data={data.daily} theme={theme} />
+        </div>
+      </div>
+
+      {/* Secondary analytics */}
+      <div className="dashboard-grid">
+        {/* Threshold breadth */}
+        <div className="card" style={{ padding: 20 }}>
+          <h3 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: 20, color: 'var(--text-primary)' }}>Threshold Frequency Breadth</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+            {[
+              { label: 'Gap Ups > 200 pts', count: data.kpi?.open_above_200, color: 'var(--accent)', total: 50 },
+              { label: 'Bullish Rallies > 500', count: data.kpi?.close_above_500, color: 'var(--bullish)', total: 30 },
+              { label: 'Bearish Sell-offs > 500', count: data.kpi?.close_below_500, color: 'var(--bearish)', total: 30 },
+            ].map((t, i) => (
+              <div key={i}>
+                <div className="flex-between" style={{ marginBottom: 7 }}>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>{t.label}</span>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 800, color: t.color }}>{t.count ?? '—'} days</span>
+                </div>
+                <div className="progress-track">
+                  <div className="progress-fill" style={{ width: `${Math.min(100, ((t.count || 0) / t.total) * 100)}%`, background: t.color, boxShadow: `0 0 8px ${t.color}40` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Rolling volatility */}
+        <div className="card" style={{ padding: 20 }}>
+          <h3 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: 20 }}>Rolling Volatility Heat</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {data.monthly.slice(-6).map((m, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 12px', borderRadius: 8, background: i % 2 === 0 ? 'var(--bg-overlay)' : 'transparent', fontSize: '0.82rem' }}>
+                <span style={{ color: 'var(--text-muted)' }}>{m.month}</span>
+                <span className="mono fw-700">±{fmtNum(m.avgRange)}</span>
+              </div>
+            ))}
+            {data.monthly.length === 0 && !data.loading && (
+              <div className="no-data">No aggregation data available for {selectedSymbol}</div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
 
-
-
-  const renderDashboard = () => {
-    if (data.error) {
-      return (
-        <div className="dashboard-content" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
-          <div className="glass" style={{ padding: '3rem', borderRadius: '24px', textAlign: 'center', maxWidth: '500px' }}>
-            <Activity size={48} color="var(--error)" style={{ marginBottom: '1.5rem' }} />
-            <h2 style={{ fontSize: '1.5rem', fontWeight: 800, marginBottom: '1rem' }}>Connection Interrupted</h2>
-            <p style={{ color: 'var(--text-dim)', marginBottom: '2rem' }}>We're having trouble reaching the TradeIQ Market Engine. Please ensure the backend proxy is running.</p>
-            <button 
-              onClick={() => window.location.reload()}
-              style={{ background: 'var(--accent)', color: 'white', border: 'none', padding: '0.8rem 2rem', borderRadius: '12px', fontWeight: 700, cursor: 'pointer' }}
-            >
-              Retry Connection
-            </button>
-            {data.error && <p style={{ fontSize: '0.7rem', color: 'var(--error)', marginTop: '2rem', opacity: 0.6 }}>Details: {data.error}</p>}
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div className="dashboard-content dashboard-fade-in" style={{ padding: '0 1rem' }}>
-        {/* Premium Header Status Row */}
-        <div className="dashboard-top-nav" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem' }}>
-          <div>
-            <h1 style={{ fontSize: '1.75rem', fontWeight: 900, letterSpacing: '-0.03em' }}>Strategic Analytics</h1>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
-            <span className="status-dot ready"></span>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)', fontWeight: 600 }}>{selectedSymbol} · Real-time Intelligence</span>
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          <div className="sync-status" style={{ fontSize: '0.75rem', color: 'var(--text-dim)', background: 'var(--border-subtle)', padding: '6px 14px', borderRadius: '8px', border: '1px solid var(--border-main)' }}>
-            <RefreshCw size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }} /> Syncing 14ms
-          </div>
-          <button className="export-btn" style={{ padding: '0.6rem 1.5rem', background: 'var(--accent)', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 700, cursor: 'pointer', boxShadow: '0 4px 15px var(--accent-glow)' }}>Analyze</button>
-        </div>
-      </div>
-
-      {/* Condensed KPI Row - Optimized Spacing */}
-      <section className="kpi-grid" style={{ marginBottom: '2.5rem', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem' }}>
-        {[
-          { label: 'Yearly Avg Open', val: data.kpi?.avg_open, trend: '+2.4%', color: 'var(--accent)', insight: 'Ascending' },
-          { label: 'Yearly Avg Close', val: data.kpi?.avg_close, trend: '+1.8%', color: 'var(--success)', insight: 'Stable' },
-          { label: 'Volatility Index', val: data.kpi?.avg_day_range, trend: '-0.3%', color: 'var(--warning)', insight: 'Contracting' }
-        ].map((k, i) => (
-          <div key={i} className="kpi-card glass" style={{ padding: '1.5rem', border: '1px solid var(--border-subtle)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{k.label}</span>
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: k.color, background: `${k.color}10`, padding: '4px 8px', borderRadius: '6px' }}>{k.trend}</span>
-            </div>
-            <div style={{ fontSize: '2.25rem', fontWeight: 900, letterSpacing: '-0.04em', margin: '0.25rem 0' }}>
-              {data.loading ? <span className="skeleton">...</span> : formatNum(k.val)}
-            </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <div style={{ width: '4px', height: '4px', borderRadius: '50%', background: k.color }}></div> {k.insight} Market Phase
-            </div>
-          </div>
-        ))}
-      </section>
-
-      {/* DOMINANT Focal Chart  */}
-      <section style={{ marginBottom: '3rem' }}>
-        <div className="chart-wrapper-full" style={{ minHeight: '680px', border: '1px solid var(--border-main)', borderRadius: '24px', background: 'var(--bg-sidebar)', overflow: 'hidden', boxShadow: 'var(--shadow-lg)' }}>
-          <div style={{ padding: '2rem 2.5rem 1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 900, letterSpacing: '-0.02em' }}>Advanced Market Price Action</h3>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)', marginTop: '4px' }}>Real-time OHLC candlestick pattern analysis</p>
-            </div>
-            <div style={{ display: 'flex', gap: '12px' }}>
-              {['1D', '1W', '1M', '3M', '1Y', 'ALL'].map(t => (
-                <button key={t} style={{ background: t === '1D' ? 'var(--accent)' : 'var(--border-subtle)', border: 'none', color: t === '1D' ? 'white' : 'var(--text-muted)', padding: '6px 12px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>{t}</button>
-              ))}
-            </div>
-          </div>
-          <CandlestickChart data={data.daily} />
-        </div>
-      </section>
-
-      {/* Balanced Secondary Analytics */}
-      <div style={{ display: 'flex', gap: '2rem' }}>
-        <div className="glass" style={{ flex: 1, padding: '2rem', borderRadius: '20px' }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: 800, marginBottom: '2rem' }}>Threshold Frequency Breadth</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-            {[
-              { label: 'Gap Ups > 200 pts', count: data.kpi?.open_above_200, color: 'var(--accent)', total: 50 },
-              { label: 'Bullish Rallies > 500', count: data.kpi?.close_above_500, color: 'var(--success)', total: 30 },
-              { label: 'Bearish Sell-offs > 500', count: data.kpi?.close_below_500, color: 'var(--error)', total: 30 }
-            ].map((t, i) => (
-              <div key={i}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{t.label}</span>
-                  <span style={{ fontSize: '0.85rem', fontWeight: 700, color: t.color }}>{t.count} D</span>
-                </div>
-                <div style={{ height: '6px', background: 'rgba(255,255,255,0.02)', borderRadius: '10px' }}>
-                  <div style={{ height: '100%', width: `${Math.min(100, (t.count / t.total) * 100)}%`, background: t.color, borderRadius: '10px', boxShadow: `0 0 10px ${t.color}40` }}></div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="glass" style={{ flex: 1, padding: '2rem', borderRadius: '20px' }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: 800, marginBottom: '2rem' }}>Rolling Volatility Heat</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            {data.monthly.slice(-5).map((m, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', borderRadius: '10px', background: i % 2 === 0 ? 'var(--border-subtle)' : 'transparent', fontSize: '0.85rem' }}>
-                <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>{m.month}</span>
-                <span style={{ fontWeight: 800, color: 'var(--text-main)' }}>±{formatNum(m.avgRange)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-    );
-  };
-
   const renderMarketData = () => (
-    <div className="dashboard-content dashboard-fade-in" style={{ padding: '2rem 1.5rem' }}>
-      {/* 2. Page Header Area */}
-      <div className="page-header" style={{ marginBottom: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div className="header-left">
-          <h1 style={{ fontSize: '2rem', fontWeight: 900, letterSpacing: '-0.04em', margin: 0 }}>Market Data Explorer</h1>
-          <p style={{ color: 'var(--text-dim)', fontSize: '1rem', marginTop: '4px' }}>Full historical dataset access for {selectedSymbol}</p>
+    <div style={{ animation: 'fadeIn 0.4s ease' }}>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Market Data Explorer</h1>
+          <p className="page-subtitle">Historical OHLCV dataset · {selectedSymbol}</p>
         </div>
-        <div className="header-right" style={{ display: 'flex', gap: '12px' }}>
-          <div className="search-box-container">
-            <Search size={16} className="search-icon" />
-            <input type="text" placeholder="Search indices, symbols..." style={{ fontSize: '0.85rem' }} />
-          </div>
-          <button className="icon-btn" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-main)' }}><RefreshCw size={16} /></button>
-          <button className="icon-btn" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-main)', width: 'auto', padding: '0 1rem', fontSize: '0.75rem', fontWeight: 700 }}>EXPORT CSV</button>
-          <button className="icon-btn" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-main)' }}><Filter size={16} /></button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="icon-btn"><RefreshCw size={15} onClick={loadData} /></button>
+          <button className="btn btn-ghost btn-sm"><Filter size={13} /> Filter</button>
         </div>
       </div>
 
-      {/* 3. Summary Cards Row */}
-      <div className="summary-cards-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.5rem', marginBottom: '2.5rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 20 }}>
         {[
-          { label: 'Average Close', val: formatNum(data.kpi?.avg_close), icon: <Activity size={18} />, color: 'var(--accent)' },
-          { label: 'Highest High', val: formatNum(Math.max(...data.daily.map(d => d.high || 0))), icon: <ArrowUpRight size={18} />, color: 'var(--success)' },
-          { label: 'Lowest Low', val: formatNum(Math.min(...data.daily.map(d => d.low || 0))), icon: <ArrowDownLeft size={18} />, color: 'var(--error)' },
-          { label: 'Total Records', val: data.daily.length, icon: <Database size={18} />, color: 'var(--text-muted)' }
+          { label: 'Average Close', val: fmtNum(data.kpi?.avg_close), icon: <Activity size={16} />, color: 'var(--accent)' },
+          { label: 'Highest High', val: fmtNum(Math.max(...(data.daily.map(d => d.high || 0)), 0)), icon: <ArrowUpRight size={16} />, color: 'var(--bullish)' },
+          { label: 'Lowest Low', val: fmtNum(Math.min(...(data.daily.filter(d => d.low > 0).map(d => d.low || Infinity)), Infinity) || 0), icon: <ArrowDownLeft size={16} />, color: 'var(--bearish)' },
+          { label: 'Total Records', val: data.daily.length, icon: <Database size={16} />, color: 'var(--text-muted)' },
         ].map((c, i) => (
-          <div key={i} className="glass" style={{ padding: '1.5rem', borderRadius: '16px', border: '1px solid var(--border-subtle)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-dim)', fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', marginBottom: '12px' }}>
-              <div style={{ color: c.color }}>{c.icon}</div> {c.label}
+          <div key={i} className="card" style={{ padding: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: c.color, fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+              {c.icon} {c.label}
             </div>
-            <div style={{ fontSize: '1.85rem', fontWeight: 900, letterSpacing: '-0.03em' }}>{c.val}</div>
+            <div className="mono" style={{ fontSize: '1.4rem', fontWeight: 900, letterSpacing: '-0.03em' }}>{c.val}</div>
           </div>
         ))}
       </div>
 
-      {/* 4. Main Table Card */}
-      <div className="data-explorer-card">
-        <div className="sticky-table-container">
-          <table className="sticky-table">
-            <thead>
-              <tr>
-                <th style={{ width: '150px' }}>Trade Date</th>
-                <th>Open</th>
-                <th>High</th>
-                <th>Low</th>
-                <th>Close</th>
-                <th>Change</th>
-                <th>Change %</th>
-                <th style={{ width: '120px' }}>Type</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.loading ? (
-                Array(10).fill(0).map((_, i) => (
-                  <tr key={i} className="skeleton-row">
-                    <td><div className="skeleton-shimmer"></div></td>
-                    <td><div className="skeleton-shimmer"></div></td>
-                    <td><div className="skeleton-shimmer"></div></td>
-                    <td><div className="skeleton-shimmer"></div></td>
-                    <td><div className="skeleton-shimmer"></div></td>
-                    <td><div className="skeleton-shimmer"></div></td>
-                    <td><div className="skeleton-shimmer"></div></td>
-                    <td><div className="skeleton-shimmer"></div></td>
+      <div className="table-wrapper" style={{ maxHeight: 'calc(100vh - 340px)' }}>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Trade Date</th>
+              <th>Open</th>
+              <th>High</th>
+              <th>Low</th>
+              <th>Close</th>
+              <th>Change</th>
+              <th>Change %</th>
+              <th>Symbol</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.loading ? (
+              Array(12).fill(0).map((_, i) => (
+                <tr key={i}>
+                  {Array(8).fill(0).map((_, j) => (
+                    <td key={j}><div className="skel skel-line" /></td>
+                  ))}
+                </tr>
+              ))
+            ) : (
+              data.daily.slice().reverse().map((row, idx) => {
+                const change = row.close - row.open;
+                const pct    = (change / row.open) * 100;
+                const up     = change >= 0;
+                return (
+                  <tr key={idx}>
+                    <td className="mono" style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{row.time}</td>
+                    <td className="mono">{fmtNum(row.open)}</td>
+                    <td className="mono">{fmtNum(row.high)}</td>
+                    <td className="mono">{fmtNum(row.low)}</td>
+                    <td className={`mono fw-700 td-${up ? 'bullish' : 'bearish'}`}>{fmtNum(row.close)}</td>
+                    <td className={`mono ${up ? 'text-bullish' : 'text-bearish'}`}>{up ? '+' : ''}{change.toFixed(2)}</td>
+                    <td className={`mono ${up ? 'text-bullish' : 'text-bearish'}`}>{up ? '+' : ''}{pct.toFixed(2)}%</td>
+                    <td><span className="badge badge-neutral">{selectedSymbol}</span></td>
                   </tr>
-                ))
-              ) : (
-                data.daily.slice().reverse().map((row, idx) => {
-                  const change = row.close - row.open;
-                  const changePct = (change / row.open) * 100;
-                  const isUp = change >= 0;
-                  return (
-                    <tr key={idx}>
-                      <td style={{ color: 'var(--text-muted)', fontWeight: 800 }}>{row.time}</td>
-                      <td>{formatNum(row.open)}</td>
-                      <td>{formatNum(row.high)}</td>
-                      <td>{formatNum(row.low)}</td>
-                      <td style={{ color: isUp ? 'var(--success)' : 'var(--error)', fontWeight: 900 }}>{formatNum(row.close)}</td>
-                      <td className={isUp ? 'text-bullish' : 'text-bearish'}>
-                        {isUp ? '+' : ''}{change.toFixed(2)}
-                      </td>
-                      <td className={isUp ? 'text-bullish' : 'text-bearish'}>
-                        {isUp ? '+' : ''}{changePct.toFixed(2)}%
-                      </td>
-                      <td>
-                        <span style={{ 
-                          fontSize: '0.65rem', 
-                          fontWeight: 900, 
-                          padding: '3px 8px', 
-                          borderRadius: '4px', 
-                          background: 'rgba(255,255,255,0.03)', 
-                          color: 'var(--text-dim)',
-                          border: '1px solid var(--border-subtle)'
-                        }}>
-                          {selectedSymbol}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Table Behavior: Pagination Footer */}
-        <div className="table-pagination">
-          <div className="rows-selector">
-            <span>Show rows:</span>
-            <select defaultValue="100">
-              <option value="50">50</option>
-              <option value="100">100</option>
-              <option value="500">500</option>
-            </select>
-          </div>
-          <div className="page-controls" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginRight: '1rem' }}>Page 1 of {Math.ceil(data.daily.length / 100)}</span>
-            <button className="page-btn active">1</button>
-            <button className="page-btn">2</button>
-            <button className="page-btn">3</button>
-            <span style={{ color: 'var(--text-dim)' }}>...</span>
-            <button className="page-btn">{Math.ceil(data.daily.length / 100)}</button>
-          </div>
-        </div>
+                );
+              })
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );
 
   const renderHistorical = () => (
-    <div className="dashboard-content">
-      <div className="welcome">
+    <div style={{ animation: 'fadeIn 0.4s ease' }}>
+      <div className="page-header">
         <div>
-          <h1>Historical Aggregations</h1>
-          <p>Consolidated reports from {selectedSymbol === 'NIFTY 50' ? 'Databricks' : 'Real-time API'}</p>
+          <h1 className="page-title">Historical Aggregations</h1>
+          <p className="page-subtitle">Monthly summary from {selectedSymbol === 'NIFTY50' ? 'Databricks' : 'live API'}</p>
         </div>
       </div>
-      <div className="data-explorer-card" style={{ marginTop: '0' }}>
-        <div className="sticky-table-container" style={{ maxHeight: '500px' }}>
-          <table className="sticky-table">
-            <thead>
-              <tr>
-                <th>Year-Month</th>
-                <th style={{ textAlign: 'right' }}>Average Open</th>
-                <th style={{ textAlign: 'center' }}>Average Close</th>
-                <th style={{ textAlign: 'center' }}>Avg Day Range</th>
+      <div className="table-wrapper" style={{ maxHeight: 'calc(100vh - 250px)' }}>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Year-Month</th>
+              <th style={{ textAlign: 'right' }}>Avg Open</th>
+              <th style={{ textAlign: 'right' }}>Avg Close</th>
+              <th style={{ textAlign: 'right' }}>Avg Day Range</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.monthly.length === 0 ? (
+              <tr><td colSpan={4} className="no-data">No aggregation data available</td></tr>
+            ) : data.monthly.map((row, idx) => (
+              <tr key={idx}>
+                <td className="mono fw-700" style={{ color: 'var(--text-secondary)' }}>{row.month}</td>
+                <td className="mono" style={{ textAlign: 'right' }}>{fmtNum(row.avgOpen)}</td>
+                <td className="mono" style={{ textAlign: 'right' }}>{fmtNum(row.avgClose)}</td>
+                <td className="mono" style={{ textAlign: 'right' }}>±{fmtNum(row.avgRange)}</td>
               </tr>
-            </thead>
-            <tbody>
-              {data.monthly.map((row, idx) => (
-                <tr key={idx}>
-                  <td style={{ color: 'var(--text-muted)', fontWeight: 800 }}>{row.month}</td>
-                  <td style={{ textAlign: 'right' }}>{formatNum(row.avgOpen)}</td>
-                  <td style={{ textAlign: 'center' }}>{formatNum(row.avgClose)}</td>
-                  <td style={{ textAlign: 'center' }}>{formatNum(row.avgRange)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
 
   const renderSettings = () => (
-    <div className="dashboard-content">
-      <div className="welcome">
+    <div style={{ animation: 'fadeIn 0.4s ease' }}>
+      <div className="page-header">
         <div>
-          <h1>Application Settings</h1>
-          <p>Manage your profile, preferences, and notifications</p>
+          <h1 className="page-title">Application Settings</h1>
+          <p className="page-subtitle">Manage profile, preferences & notifications</p>
         </div>
       </div>
 
       <div className="settings-grid">
-        <section className="settings-card glass">
-          <div className="card-header">
-            <User size={20} />
-            <h3>User Profile</h3>
+        {/* Profile */}
+        <div className="card settings-card">
+          <div className="settings-card-header">
+            <User size={18} style={{ color: 'var(--accent-light)' }} />
+            <span className="settings-card-title">User Profile</span>
           </div>
-          <div className="card-body">
-            {user ? (
-              <div className="user-profile-detailed">
-                <div className="avatar-large">{user.avatar}</div>
-                <div className="info">
-                  <p className="p-name">{user.name}</p>
-                  <p className="p-email">{user.email}</p>
-                  <p className="p-sub">Last sync: {user.lastLogin}</p>
+          {user ? (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20, padding: '16px', background: 'var(--bg-overlay)', borderRadius: 12 }}>
+                <div className="user-avatar" style={{ width: 48, height: 48, fontSize: '1rem' }}>{user.avatar}</div>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: '1rem' }}>{user.name}</div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{user.email}</div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>Last login: {user.lastLogin}</div>
                 </div>
-                <button className="auth-btn logout" onClick={handleLogout}>Sign Out from Google</button>
               </div>
-            ) : (
-              <div className="auth-placeholder">
-                <p>Sign in to sync your watchlist across devices.</p>
-                <button className="auth-btn login" onClick={handleGoogleSignIn}>
-                  <img src="https://www.google.com/favicon.ico" alt="Google" />
-                  Sign in with Google
+              <button className="btn btn-danger" style={{ width: '100%' }} onClick={handleLogout}>Sign Out</button>
+            </div>
+          ) : (
+            <div>
+              <div className="auth-tabs">
+                {['login', 'signup'].map(t => (
+                  <button key={t} className={`auth-tab-btn ${authTab === t ? 'active' : ''}`} onClick={() => { setAuthTab(t); setAuthError(null); }}>
+                    {t === 'login' ? 'Log In' : 'Sign Up'}
+                  </button>
+                ))}
+              </div>
+              <form onSubmit={authTab === 'login' ? handleLogin : handleSignup} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {authTab === 'signup' && (
+                  <div>
+                    <label className="form-label">Full Name</label>
+                    <input className="form-input" type="text" value={authName} onChange={e => setAuthName(e.target.value)} placeholder="John Doe" required />
+                  </div>
+                )}
+                <div>
+                  <label className="form-label">Email</label>
+                  <input className="form-input" type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} placeholder="user@example.com" required />
+                </div>
+                <div>
+                  <label className="form-label">Password</label>
+                  <input className="form-input" type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} placeholder="••••••••" required />
+                </div>
+                {authError && <div style={{ color: 'var(--error)', fontSize: '0.75rem', padding: '8px 12px', background: 'var(--error-dim)', borderRadius: 8, border: '1px solid rgba(244,63,94,0.2)' }}>⚠ {authError}</div>}
+                <button type="submit" className="btn btn-primary" disabled={authLoading} style={{ marginTop: 4 }}>
+                  {authLoading ? 'Processing...' : authTab === 'login' ? 'Log In' : 'Create Account'}
                 </button>
-              </div>
-            )}
-          </div>
-        </section>
-
-        <section className="settings-card glass">
-          <div className="card-header">
-            <Settings size={20} />
-            <h3>General Preferences</h3>
-          </div>
-          <div className="card-body">
-            <div className="setting-row">
-              <div className="s-text">
-                <p className="s-label">Visual Theme</p>
-                <p className="s-desc">Switch between dark and light mode</p>
-              </div>
-              <button className="theme-pill" onClick={toggleTheme}>
-                {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}
-              </button>
+              </form>
             </div>
-            <div className="setting-row">
-              <div className="s-text">
-                <p className="s-label">Real-time Notifications</p>
-                <p className="s-desc">Receive alerts on price threshold crossings</p>
-              </div>
-              <label className="switch">
-                <input 
-                  type="checkbox" 
-                  checked={notificationsEnabled} 
-                  onChange={() => setNotificationsEnabled(!notificationsEnabled)} 
-                />
-                <span className="slider"></span>
-              </label>
+          )}
+        </div>
+
+        {/* Preferences */}
+        <div className="card settings-card">
+          <div className="settings-card-header">
+            <Settings size={18} style={{ color: 'var(--accent-light)' }} />
+            <span className="settings-card-title">General Preferences</span>
+          </div>
+          <div className="setting-row">
+            <div>
+              <div className="setting-label">Visual Theme</div>
+              <div className="setting-desc">Switch between dark and light mode</div>
+            </div>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              {theme === 'dark' ? <><Sun size={14} /> Light</> : <><Moon size={14} /> Dark</>}
+            </button>
+          </div>
+          <div className="setting-row">
+            <div>
+              <div className="setting-label">Default Symbol</div>
+              <div className="setting-desc">Currently: {selectedSymbol}</div>
+            </div>
+            <select className="form-input form-select" style={{ width: 130 }} value={selectedSymbol} onChange={e => setSelectedSymbol(e.target.value)}>
+              {INDIA_SYMBOLS.map(s => <option key={s.symbol} value={s.symbol}>{s.symbol}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Alert config */}
+        <div className="card settings-card">
+          <div className="settings-card-header">
+            <Bell size={18} style={{ color: 'var(--warning)' }} />
+            <span className="settings-card-title">Market Alerts</span>
+          </div>
+          <div style={{ padding: '12px 0' }}>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 14 }}>
+              Configure point thresholds for milestone alerts (±200, ±300, ±500)
+            </p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {['Aggressive', 'Moderate', 'Conservative'].map(m => (
+                <span key={m} className="badge badge-accent">{m}</span>
+              ))}
             </div>
           </div>
-        </section>
+        </div>
 
-        <section className="settings-card glass">
-          <div className="card-header">
-            <Bell size={20} />
-            <h3>Market Alerts</h3>
+        {/* Subscription */}
+        <div className="card settings-card card-accent">
+          <div className="settings-card-header">
+            <CreditCard size={18} style={{ color: 'var(--accent-light)' }} />
+            <span className="settings-card-title">Subscription</span>
           </div>
-          <div className="card-body">
-             <div className="alert-config">
-                <p className="s-desc">Configure your point thresholds for Nifty metrics (Current: ±200, ±300, ±500)</p>
-                <div className="badge-list">
-                  <span className="badge">Aggressive</span>
-                  <span className="badge secondary">Moderate</span>
-                  <span className="badge secondary">Conservative</span>
-                </div>
-             </div>
+          <div style={{ padding: '8px 0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <span className="badge badge-accent">FREE TIER</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>3 symbols · 1 alert rule</span>
+            </div>
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 14 }}>
+              Upgrade to Pro for unlimited symbols, milestone chains, and Telegram alerts.
+            </p>
+            <button className="btn btn-primary btn-sm" style={{ width: '100%' }}>
+              Upgrade to Pro — ₹499/mo <ChevronRight size={14} />
+            </button>
           </div>
-        </section>
+        </div>
       </div>
     </div>
   );
 
-  const renderSignals = () => (
-    <div className="dashboard-content">
-      <div className="welcome">
-        <div>
-          <h1>Technical Signals</h1>
-          <p>RSI · MACD · Bollinger Bands · RVOL · EMA · ATR · VWAP · Composite Score</p>
+  /* ─── nav group renderer ─────────────────────────────────────────────────── */
+  const renderSidebar = () => (
+    <aside className="sidebar">
+      {/* Logo */}
+      <div className="sidebar-logo" onClick={() => setActiveTab('dashboard')}>
+        <div className="sidebar-logo-icon">
+          <TrendingUp size={16} />
         </div>
+        <span className="sidebar-logo-text">TradeIQ</span>
+        <span className="sidebar-logo-badge">STAP</span>
       </div>
-      <div style={{ maxWidth: 640, margin: '0 auto' }}>
-        <IndicatorPanel symbol={selectedSymbol} />
-      </div>
-    </div>
-  );
 
-  const renderPatterns = () => (
-    <div className="dashboard-content">
-      <div className="welcome">
-        <div>
-          <h1>Candlestick Patterns</h1>
-          <p>Doji · Hammer · Engulfing · Morning/Evening Star · Shooting Star · Three Soldiers/Crows · Harami</p>
-        </div>
-      </div>
-      <div style={{ maxWidth: 640, margin: '0 auto' }}>
-        <PatternPanel symbol={selectedSymbol} />
-      </div>
-    </div>
-  );
+      {/* Nav groups */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+        {NAV_GROUPS.map(group => {
+          const items = NAV.filter(n => n.group === group.id);
+          return (
+            <div key={group.id} className="sidebar-section">
+              <div className="sidebar-section-label">{group.label}</div>
+              {items.map(item => (
+                <button
+                  key={item.id}
+                  className={`nav-item ${activeTab === item.id ? 'active' : ''}`}
+                  onClick={() => setActiveTab(item.id)}
+                >
+                  <item.icon size={15} className="nav-item-icon" />
+                  <span style={{ flex: 1 }}>{item.label}</span>
+                  {item.badge && <span className="nav-item-badge">{item.badge}</span>}
+                </button>
+              ))}
+            </div>
+          );
+        })}
 
-  const renderAlerts = () => (
-    <div className="dashboard-content">
-      <div className="welcome">
-        <div>
-          <h1>Milestone Alerts</h1>
-          <p>Progressive alerts with plain-language coaching · Stop-loss · Targets · Telegram delivery</p>
-        </div>
-      </div>
-      <div style={{ maxWidth: 700, margin: '0 auto' }}>
-        <MilestoneAlerts symbol={selectedSymbol} />
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="main-layout" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-      <MarketTickerBar symbol={selectedSymbol} livePrice={livePrice} />
-      
-      <div className="layout" style={{ flex: 1, overflow: 'hidden' }}>
-        {/* Sidebar - Precision Engineered */}
-      <aside className="sidebar">
-        <div className="logo" onClick={() => setActiveTab('dashboard')} style={{ cursor: 'pointer' }}>
-          <TrendingUp className="logo-icon" />
-          <span>TradeIQ</span>
-        </div>
-        
-        <nav className="nav">
-          <button className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
-            <LayoutDashboard size={18} /> <span>Analytics</span>
-          </button>
-          <button className={`nav-item ${activeTab === 'data' ? 'active' : ''}`} onClick={() => setActiveTab('data')}>
-            <Database size={18} /> <span>Market Data</span>
-          </button>
-          <button className={`nav-item ${activeTab === 'news' ? 'active' : ''}`} onClick={() => setActiveTab('news')}>
-            <FileText size={18} /> <span>Market News</span>
-          </button>
-          <button className={`nav-item ${activeTab === 'historical' ? 'active' : ''}`} onClick={() => setActiveTab('historical')}>
-            <Target size={18} /> <span>Aggregations</span>
-          </button>
-          <button className={`nav-item ${activeTab === 'signals' ? 'active' : ''}`} onClick={() => setActiveTab('signals')}>
-            <Activity size={18} /> <span>Signals</span>
-          </button>
-          <button className={`nav-item ${activeTab === 'patterns' ? 'active' : ''}`} onClick={() => setActiveTab('patterns')}>
-            <Sparkles size={18} /> <span>Patterns</span>
-          </button>
-          <button className={`nav-item ${activeTab === 'alerts' ? 'active' : ''}`} onClick={() => setActiveTab('alerts')}>
-            <Bell size={18} /> <span>Alerts</span>
-          </button>
-          <button className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
-            <Settings size={18} /> <span>Settings</span>
-          </button>
-        </nav>
-
-        {/* Watchlist below nav as per spec */}
-        <div className="watchlist-section" style={{ marginTop: '2.5rem', flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', padding: '0 0.5rem' }}>
-            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Watchlist</span>
-            <button className="icon-btn" style={{ width: '24px', height: '24px' }}><Plus size={14} /></button>
+        {/* Watchlist */}
+        <div className="sidebar-watchlist">
+          <div className="watchlist-header">
+            <span className="watchlist-label">Watchlist</span>
+            <button className="watchlist-add-btn"><Plus size={12} /></button>
           </div>
-          <div className="watchlist-scroll" style={{ flex: 1, overflowY: 'auto', paddingRight: '4px' }}>
+          <div className="watchlist-scroll">
             {watchlist.map(sym => {
-              const stock = STOCKS.find(s => s.symbol === sym) || { symbol: sym, name: '' };
+              const stock = INDIA_SYMBOLS.find(s => s.symbol === sym) || { symbol: sym, name: sym };
+              const initials = sym.replace(/[^A-Z]/g, '').slice(0, 2);
               return (
-                <div key={sym} className={`watchlist-item ${selectedSymbol === sym ? 'active' : ''}`} onClick={() => setSelectedSymbol(sym)} style={{ padding: '0.85rem 1rem', marginBottom: '4px', border: '1px solid transparent' }}>
-                  <div className="w-info" style={{ flex: 1 }}>
-                    <span className="w-symbol" style={{ fontWeight: 800, fontSize: '0.9rem' }}>{sym}</span>
-                    <span className="w-name" style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>{stock.name}</span>
-                  </div>
-                  
-                  {/* Sparkline Indicator */}
-                  <div className="w-sparkline" style={{ width: '48px', height: '24px', margin: '0 12px' }}>
-                     <svg width="100%" height="100%" viewBox="0 0 48 24">
-                        <path 
-                           d={sym.startsWith('N') ? "M0 18 Q12 12 24 14 T48 4" : "M0 6 Q12 18 24 12 T48 20"} 
-                           fill="none" 
-                           stroke={sym.startsWith('N') ? "var(--success)" : "var(--error)"} 
-                           strokeWidth="2"
-                           strokeLinecap="round"
-                        />
-                     </svg>
-                  </div>
-
-                  <div className="w-meta" style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: sym.startsWith('N') ? 'var(--success)' : 'var(--error)' }}>
-                      {sym.startsWith('N') ? '+1.24%' : '-0.42%'}
-                    </div>
-                    <div style={{ fontSize: '0.65rem', color: 'var(--text-dim)', opacity: 0.6 }}>VOL: 1.2M</div>
+                <div
+                  key={sym}
+                  className={`watchlist-item ${selectedSymbol === sym ? 'active' : ''}`}
+                  onClick={() => selectSymbol(sym)}
+                >
+                  <div className="wl-icon">{initials}</div>
+                  <div className="wl-info">
+                    <span className="wl-symbol">{sym}</span>
+                    <span className="wl-name">{stock.name}</span>
                   </div>
                 </div>
               );
             })}
           </div>
         </div>
+      </div>
 
-        <div className="sidebar-footer" style={{ marginTop: 'auto', paddingTop: '1.5rem', borderTop: '1px solid var(--border-main)' }}>
-          <div className="user-profile" onClick={() => setActiveTab('settings')} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div className="avatar" style={{ width: '36px', height: '36px', borderRadius: '10px', fontSize: '0.8rem' }}>{user ? user.avatar : '??'}</div>
-            <div className="user-info">
-              <p className="name" style={{ fontSize: '0.85rem' }}>{user ? user.name : 'Guest'}</p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.7rem', color: 'var(--success)' }}>
-                <div className="status-dot ready"></div>
-                <span>Live Status</span>
-              </div>
-            </div>
+      {/* Footer */}
+      <div className="sidebar-footer">
+        <div className="user-pill" onClick={() => setActiveTab('settings')}>
+          <div className="user-avatar">{user ? user.avatar : <User size={14} />}</div>
+          <div className="user-info-text">
+            <span className="user-name">{user ? user.name : 'Guest'}</span>
+            <span className="user-status">
+              <div className="status-dot live" />
+              Live Trading
+            </span>
           </div>
+          <Settings size={13} style={{ color: 'var(--text-muted)', marginLeft: 'auto' }} />
         </div>
-      </aside>
+      </div>
+    </aside>
+  );
 
-      {/* Main Content Area */}
-      <div className="main-wrapper">
-        <LivePriceBanner symbol={selectedSymbol} theme={theme} onPriceUpdate={setLivePrice} />
-        
-        <header className="top-search-bar">
-          <div className="search-box-container">
-            <Search size={18} className="search-icon" />
-            <input 
-              type="text" 
-              placeholder="Search assets, indices, analysts..." 
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setShowSearchResults(true);
-              }}
-              onFocus={() => setShowSearchResults(true)}
-            />
-            {showSearchResults && searchQuery && (
-              <div className="search-results">
-                {STOCKS.filter(s => s.symbol.includes(searchQuery.toUpperCase())).map(s => (
-                  <div key={s.symbol} className="search-result-item" style={{ padding: '0.75rem 1rem', cursor: 'pointer' }} onClick={() => {
-                    setSelectedSymbol(s.symbol);
-                    setSearchQuery('');
-                    setShowSearchResults(false);
-                  }}>
-                    <span className="res-symbol" style={{ fontWeight: 700, fontSize: '0.9rem' }}>{s.symbol}</span>
-                    <span className="res-name" style={{ fontSize: '0.75rem', color: 'var(--text-dim)', display: 'block' }}>{s.name}</span>
+  /* ─── MAIN RETURN ─────────────────────────────────────────────────────────── */
+  return (
+    <div className="app-root">
+      {/* Ticker bar */}
+      <MarketTickerBar symbol={selectedSymbol} livePrice={livePrice} />
+
+      <div className="app-body">
+        {renderSidebar()}
+
+        <div className="main-area">
+          {/* Live price banner */}
+          <LivePriceBanner symbol={selectedSymbol} theme={theme} onPriceUpdate={setLivePrice} />
+
+          {/* Top bar */}
+          <header className="top-bar">
+            <div className="search-wrapper" ref={searchRef}>
+              <div className="search-input-row">
+                <Search size={14} className="search-icon" />
+                <input
+                  type="text"
+                  placeholder="Search symbols, indices…"
+                  value={searchQuery}
+                  onChange={e => { setSearchQuery(e.target.value); setShowSearch(true); }}
+                  onFocus={() => setShowSearch(true)}
+                />
+              </div>
+              {showSearch && searchQuery && (
+                <div className="search-dropdown">
+                  {filteredSymbols.length === 0
+                    ? <div style={{ padding: '14px 12px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>No results</div>
+                    : filteredSymbols.map(s => (
+                      <div key={s.symbol} className="search-result" onClick={() => selectSymbol(s.symbol)}>
+                        <span className="search-result-symbol">{s.symbol}</span>
+                        <span className="search-result-name">{s.name}</span>
+                        <span className="search-result-type">{s.type}</span>
+                      </div>
+                    ))
+                  }
+                </div>
+              )}
+            </div>
+
+            <div className="top-bar-actions">
+              <div className={`market-status-pill ${livePrice.isMarketOpen ? 'open' : 'closed'}`}>
+                <div className={`status-dot ${livePrice.isMarketOpen ? 'live' : 'offline'}`} />
+                {livePrice.isMarketOpen ? 'Market Open' : 'Market Closed'}
+              </div>
+              <button className="icon-btn" onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}>
+                {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+              </button>
+              <button className="icon-btn">
+                <Bell size={16} />
+              </button>
+              <button className="icon-btn" onClick={() => setActiveTab('settings')}>
+                <Settings size={16} />
+              </button>
+            </div>
+          </header>
+
+          {/* Content */}
+          <main className="content-area">
+            {activeTab === 'dashboard'  && renderDashboard()}
+            {activeTab === 'data'       && renderMarketData()}
+            {activeTab === 'historical' && renderHistorical()}
+            {activeTab === 'settings'   && renderSettings()}
+
+            {activeTab === 'news' && (
+              <div style={{ animation: 'fadeIn 0.4s ease' }}>
+                <div className="page-header">
+                  <div>
+                    <h1 className="page-title">Market Intelligence Feed</h1>
+                    <p className="page-subtitle">Real-time sector news · Sentiment scored</p>
                   </div>
-                ))}
+                </div>
+                <NewsPanel isFullPage={true} />
               </div>
             )}
-          </div>
-          
-          <div className="top-actions">
-             <div className={`market-status-pill ${livePrice.isMarketOpen ? '' : 'closed'}`}>
-               <Clock size={14} /> <span>{livePrice.isMarketOpen ? 'MARKET OPEN' : 'MARKET CLOSED'}</span>
-             </div>
-            <button className="icon-btn" onClick={toggleTheme}>
-              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
-            </button>
-            <button className="icon-btn"><Bell size={20} /></button>
-          </div>
-        </header>
 
-        <main className="dashboard-container">
-          <div className="main-scroll-area">
-            {activeTab === 'dashboard' && renderDashboard()}
-            {activeTab === 'data' && renderMarketData()}
-            {activeTab === 'news' && renderNewsTab()}
-            {activeTab === 'historical' && renderHistorical()}
-            {activeTab === 'signals' && renderSignals()}
-            {activeTab === 'patterns' && renderPatterns()}
-            {activeTab === 'alerts' && renderAlerts()}
-            {activeTab === 'settings' && renderSettings()}
-          </div>
-        </main>
+            {activeTab === 'signals' && (
+              <div style={{ animation: 'fadeIn 0.4s ease' }}>
+                <div className="page-header">
+                  <div>
+                    <h1 className="page-title">Technical Signals</h1>
+                    <p className="page-subtitle">RSI · MACD · Bollinger Bands · RVOL · EMA · ATR · VWAP · Score</p>
+                  </div>
+                </div>
+                <div style={{ maxWidth: 720, margin: '0 auto' }}>
+                  <IndicatorPanel symbol={selectedSymbol} theme={theme} />
+                </div>
+              </div>
+            )}
 
-        <AiChat 
-          isOpen={isChatOpen} 
-          onClose={() => setIsChatOpen(!isChatOpen)} 
-          selectedSymbol={selectedSymbol}
-          databricksData={{
-            summary: data.kpi,
-            monthly: data.monthly,
-            recent: data.daily.slice(-10),
-            symbol: selectedSymbol
-          }}
-        />
+            {activeTab === 'patterns' && (
+              <div style={{ animation: 'fadeIn 0.4s ease' }}>
+                <div className="page-header">
+                  <div>
+                    <h1 className="page-title">Candlestick Patterns</h1>
+                    <p className="page-subtitle">Doji · Hammer · Engulfing · Morning/Evening Star · Harami · More</p>
+                  </div>
+                </div>
+                <div style={{ maxWidth: 720, margin: '0 auto' }}>
+                  <PatternPanel symbol={selectedSymbol} theme={theme} />
+                </div>
+              </div>
+            )}
 
-        {notificationsEnabled && <ToastContainer />}
+            {activeTab === 'sentiment' && (
+              <div style={{ animation: 'fadeIn 0.4s ease' }}>
+                <div className="page-header">
+                  <div>
+                    <h1 className="page-title">Sentiment Analysis</h1>
+                    <p className="page-subtitle">FinBERT NLP · Reddit crowd · Unified sentiment score · {selectedSymbol}</p>
+                  </div>
+                </div>
+                <div style={{ maxWidth: 760, margin: '0 auto' }}>
+                  <SentimentPanel symbol={selectedSymbol} isFullPage={true} />
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'alerts' && (
+              <div style={{ animation: 'fadeIn 0.4s ease' }}>
+                <div className="page-header">
+                  <div>
+                    <h1 className="page-title">Milestone Alerts</h1>
+                    <p className="page-subtitle">Progressive alerts · Coaching messages · Stop-loss · Telegram</p>
+                  </div>
+                </div>
+                <div style={{ maxWidth: 760, margin: '0 auto' }}>
+                  <MilestoneAlerts symbol={selectedSymbol} theme={theme} />
+                </div>
+              </div>
+            )}
+          </main>
+        </div>
       </div>
-    </div>
+
+      {/* AI Chat FAB */}
+      <button className="chat-fab" onClick={() => setIsChatOpen(o => !o)}>
+        <Bot size={18} />
+        Ask AI
+      </button>
+
+      {isChatOpen && (
+        <AiChat
+          isOpen={isChatOpen}
+          onClose={() => setIsChatOpen(false)}
+          selectedSymbol={selectedSymbol}
+          databricksData={{ summary: data.kpi, monthly: data.monthly, recent: data.daily.slice(-10), symbol: selectedSymbol }}
+        />
+      )}
+
+      {notificationsEnabled && <ToastContainer />}
     </div>
   );
 }
-
-export default App

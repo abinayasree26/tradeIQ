@@ -1,226 +1,233 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, TrendingUp, TrendingDown, Minus, Activity, Target, Zap, Clock, Sparkles } from 'lucide-react';
+/**
+ * PatternPanel.jsx — Candlestick Pattern Recognition
+ * Displays detected patterns with signal, strength, and coaching.
+ */
+import { useState, useEffect, useCallback } from 'react';
+import { RefreshCw, TrendingUp, TrendingDown, Minus, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import { CONFIG } from '../config';
 
-// ── Signal badge ────────────────────────────────────────────────────────────
-const SIGNAL_CONFIG = {
-  bullish:  { color: '#69f0ae', bg: 'rgba(105,240,174,0.12)', label: '🟢 Bullish Reversal' },
-  bearish:  { color: '#ff5252', bg: 'rgba(255,82,82,0.12)',  label: '🔴 Bearish Reversal' },
-  neutral:  { color: '#90a4ae', bg: 'rgba(144,164,174,0.10)', label: '⚪ Neutral / Indecision' },
+const SIGNAL_COLOR = {
+  bullish: 'var(--bullish)',
+  bearish: 'var(--bearish)',
+  neutral: 'var(--text-muted)',
 };
 
-function PatternSignalBadge({ label, score }) {
-  const cfg = SIGNAL_CONFIG[label] || SIGNAL_CONFIG.neutral;
+const STRENGTH_LABEL = { strong: '⬆⬆ Strong', medium: '⬆ Medium', weak: '— Weak' };
+
+/* Small SVG candlestick icon per pattern type */
+function CandleIcon({ signal }) {
+  const color = SIGNAL_COLOR[signal] || 'var(--text-muted)';
+  if (signal === 'bullish') return (
+    <svg width={24} height={32} viewBox="0 0 24 32">
+      <line x1={12} y1={0} x2={12} y2={6}  stroke={color} strokeWidth={2} />
+      <rect  x={6}  y={6}  width={12} height={18} fill={color} rx={2} />
+      <line x1={12} y1={24} x2={12} y2={32} stroke={color} strokeWidth={2} />
+    </svg>
+  );
+  if (signal === 'bearish') return (
+    <svg width={24} height={32} viewBox="0 0 24 32">
+      <line x1={12} y1={0} x2={12} y2={6}  stroke={color} strokeWidth={2} />
+      <rect  x={6}  y={6}  width={12} height={18} fill="none" stroke={color} strokeWidth={2} rx={2} />
+      <line x1={12} y1={24} x2={12} y2={32} stroke={color} strokeWidth={2} />
+    </svg>
+  );
   return (
-    <div style={{
-      display: 'inline-flex', alignItems: 'center', gap: 8,
-      padding: '6px 14px', borderRadius: 20,
-      background: cfg.bg, border: `1px solid ${cfg.color}40`,
-      color: cfg.color, fontWeight: 700, fontSize: 14,
+    <svg width={24} height={32} viewBox="0 0 24 32">
+      <line x1={12} y1={0} x2={12} y2={8}  stroke={color} strokeWidth={2} />
+      <rect  x={4}  y={8}  width={16} height={16} fill="none" stroke={color} strokeWidth={2} rx={2} />
+      <line x1={12} y1={24} x2={12} y2={32} stroke={color} strokeWidth={2} />
+    </svg>
+  );
+}
+
+function PatternCard({ pattern }) {
+  const [expanded, setExpanded] = useState(false);
+  const color = SIGNAL_COLOR[pattern.signal] || 'var(--text-muted)';
+
+  return (
+    <div className={`card pattern-card ${expanded ? '' : ''}`} style={{
+      background: `${color}08`,
+      border: `1px solid ${color}28`,
+      padding: '14px 16px',
+      marginBottom: 8,
+      flexDirection: 'column',
+      alignItems: 'stretch',
+      gap: 0,
     }}>
-      {cfg.label}
-      {score !== undefined && (
-        <span style={{ fontSize: 11, opacity: 0.8 }}>({score > 0 ? '+' : ''}{score})</span>
+      <div className="flex-between" style={{ cursor: 'pointer' }} onClick={() => setExpanded(e => !e)}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <CandleIcon signal={pattern.signal} />
+          <div>
+            <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-primary)' }}>{pattern.name}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3 }}>
+              <span className="badge" style={{ background: `${color}15`, color, border: `1px solid ${color}30`, display: 'flex', alignItems: 'center', gap: 4 }}>
+                {pattern.signal === 'bullish' ? <TrendingUp size={10} /> : pattern.signal === 'bearish' ? <TrendingDown size={10} /> : <Minus size={10} />}
+                {pattern.signal}
+              </span>
+              {pattern.strength && (
+                <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                  {STRENGTH_LABEL[pattern.strength] || pattern.strength}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+        {expanded ? <ChevronUp size={14} color="var(--text-muted)" /> : <ChevronDown size={14} color="var(--text-muted)" />}
+      </div>
+
+      {expanded && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${color}20` }}>
+          {pattern.description && (
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 8 }}>
+              {pattern.description}
+            </div>
+          )}
+          {pattern.candles_involved != null && (
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+              Candles: {pattern.candles_involved}
+            </div>
+          )}
+          {pattern.reliability != null && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginBottom: 4 }}>Reliability</div>
+              <div className="progress-track">
+                <div className="progress-fill" style={{ width: `${pattern.reliability}%`, background: color }} />
+              </div>
+              <div style={{ fontSize: '0.65rem', color, marginTop: 3 }}>{pattern.reliability}%</div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
 }
 
-// ── Single Pattern Row ───────────────────────────────────────────────────────
-function PatternItem({ pattern }) {
-  const isBullish = pattern.signal === 'bullish';
-  const isBearish = pattern.signal === 'bearish';
-  const color = isBullish ? '#69f0ae' : isBearish ? '#ff5252' : '#90a4ae';
-  
-  return (
-    <div style={{
-      padding: '12px 14px',
-      background: 'rgba(255,255,255,0.02)',
-      borderRadius: 8,
-      borderLeft: `4px solid ${color}`,
-      marginBottom: 10,
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-        <span style={{ fontWeight: 700, fontSize: 14, color: '#e0e0e0' }}>{pattern.name}</span>
-        <span style={{
-          fontSize: 10, fontWeight: 800, textTransform: 'uppercase',
-          padding: '2px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.05)',
-          color: color
-        }}>{pattern.strength?.replace('_', ' ')}</span>
-      </div>
-      <div style={{ fontSize: 12, color: '#b0bec5', marginBottom: 4 }}>
-        <strong>Meaning:</strong> {pattern.meaning}
-      </div>
-      <div style={{ fontSize: 12, color: '#90a4ae' }}>
-        <strong>Coaching Recommendation:</strong> <span style={{ color: '#ffcc02' }}>{pattern.action}</span>
-      </div>
-    </div>
-  );
-}
-
-export default function PatternPanel({ symbol }) {
-  const [data, setData] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [lastFetch, setLastFetch] = useState(null);
+export default function PatternPanel({ symbol, theme = 'dark' }) {
+  const [data, setData]       = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState(null);
 
   const fetchPatterns = useCallback(async () => {
     if (!symbol) return;
-    setLoading(true);
-    setError(null);
+    setLoading(true); setError(null);
     try {
-      // 1. Fetch current patterns
-      const res = await window.fetch(CONFIG.STAP.PATTERNS(symbol));
+      const res  = await fetch(CONFIG.STAP.PATTERNS(symbol));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       setData(json);
-      setLastFetch(new Date().toLocaleTimeString('en-IN'));
-
-      // 2. Fetch pattern history
-      const historyRes = await window.fetch(CONFIG.STAP.PATTERNS_HISTORY(symbol));
-      if (historyRes.ok) {
-        const historyJson = await historyRes.json();
-        setHistory(historyJson);
-      }
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
   }, [symbol]);
 
-  useEffect(() => {
-    fetchPatterns();
-  }, [fetchPatterns]);
+  useEffect(() => { fetchPatterns(); }, [fetchPatterns]);
 
-  const patterns = data?.patterns_detected || [];
-  const overallSignal = data?.pattern_signal || 'neutral';
-  const overallScore = data?.pattern_score || 0;
+  const patterns   = data?.patterns_detected || data?.patterns || [];
+  const bullish    = patterns.filter(p => p.signal === 'bullish');
+  const bearish    = patterns.filter(p => p.signal === 'bearish');
+  const neutral    = patterns.filter(p => p.signal === 'neutral' || !p.signal);
+  const overallSig = data?.pattern_signal || (bullish.length > bearish.length ? 'bullish' : bearish.length > bullish.length ? 'bearish' : 'neutral');
+  const overallColor = SIGNAL_COLOR[overallSig];
 
-  const card = (title, icon, children) => (
-    <div style={{
-      background: 'rgba(255,255,255,0.04)', borderRadius: 12,
-      border: '1px solid rgba(255,255,255,0.08)', padding: '16px 18px', marginBottom: 14,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        {icon}
-        <span style={{ fontWeight: 600, fontSize: 13, color: '#b0bec5' }}>{title}</span>
+  if (loading) return (
+    <div>
+      <div className="flex-between" style={{ marginBottom: 14 }}>
+        <div className="skel" style={{ width: 160, height: 20 }} />
+        <div className="skel" style={{ width: 70, height: 30 }} />
       </div>
-      {children}
+      {Array(4).fill(0).map((_, i) => <div key={i} className="skel skel-block" />)}
+    </div>
+  );
+
+  if (error) return (
+    <div className="card" style={{ padding: 32, textAlign: 'center' }}>
+      <AlertTriangle size={28} style={{ color: 'var(--warning)', marginBottom: 12 }} />
+      <div style={{ fontWeight: 700, marginBottom: 6 }}>Patterns Unavailable</div>
+      <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 14 }}>{error}</div>
+      <button className="btn btn-ghost btn-sm" onClick={fetchPatterns}>Retry</button>
     </div>
   );
 
   return (
-    <div style={{ padding: '0 4px' }}>
+    <div>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div className="flex-between" style={{ marginBottom: 16 }}>
         <div>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Candlestick Pattern Dashboard</h3>
-          <span style={{ fontSize: 11, color: '#666' }}>{symbol} · {lastFetch ? `Updated ${lastFetch}` : 'Loading...'}</span>
+          <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>Pattern Recognition</div>
+          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 2 }}>{symbol} · {patterns.length} pattern{patterns.length !== 1 ? 's' : ''} detected</div>
         </div>
-        <button
-          onClick={fetchPatterns}
-          disabled={loading}
-          style={{
-            background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: 8, padding: '6px 12px', cursor: 'pointer', color: '#e0e0e0',
-            display: 'flex', alignItems: 'center', gap: 6, fontSize: 12,
-          }}
-        >
-          <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
-          {loading ? 'Analyzing...' : 'Refresh'}
+        <button className="btn btn-ghost btn-sm" onClick={fetchPatterns} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <RefreshCw size={12} /> Refresh
         </button>
       </div>
 
-      {error && (
-        <div style={{ background: 'rgba(255,82,82,0.1)', border: '1px solid #ff525240', borderRadius: 8, padding: 12, marginBottom: 14, color: '#ff5252', fontSize: 12 }}>
-          ⚠ Backend not reachable ({error}). Start the Python backend on port 8000.
-        </div>
-      )}
-
-      {/* Overall Signal */}
-      {card('Overall Pattern Direction', <Zap size={15} color="#ffcc02" />,
-        <div style={{ textAlign: 'center', padding: '8px 0' }}>
-          <PatternSignalBadge label={overallSignal} score={overallScore} />
-          <div style={{ fontSize: 11, color: '#666', marginTop: 8 }}>
-            Combined score of detected candlestick patterns (Bullish = +20, Bearish = -20)
+      {/* Summary */}
+      {patterns.length > 0 && (
+        <div className="card" style={{ padding: 16, marginBottom: 16, display: 'flex', gap: 20, alignItems: 'center' }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '1.8rem', fontWeight: 900, color: overallColor }}>{patterns.length}</div>
+            <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Total</div>
+          </div>
+          <div className="price-banner-divider" />
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--bullish)' }}>{bullish.length}</div>
+            <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Bullish</div>
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--bearish)' }}>{bearish.length}</div>
+            <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Bearish</div>
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--text-muted)' }}>{neutral.length}</div>
+            <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Neutral</div>
+          </div>
+          <div style={{ marginLeft: 'auto' }}>
+            <span className={`signal-badge signal-${overallSig === 'bullish' ? 'BUY' : overallSig === 'bearish' ? 'SELL' : 'NEUTRAL'}`} style={{ textTransform: 'capitalize' }}>
+              {overallSig}
+            </span>
           </div>
         </div>
       )}
 
-      {/* Detected Patterns List */}
-      {card('Detected Patterns', <Sparkles size={15} color="#69f0ae" />,
-        patterns.length > 0 ? (
-          <div>
-            {patterns.map((p, idx) => (
-              <PatternItem key={idx} pattern={p} />
-            ))}
-          </div>
-        ) : (
-          <div style={{ textAlign: 'center', padding: '16px 0', color: '#666', fontSize: 13 }}>
-             No distinct candlestick patterns detected in recent candles.
-          </div>
-        )
-      )}
-
-      {/* Coach Interpretation */}
-      {data?.coaching && card('Pattern Coaching Insight', <Activity size={15} color="#ce93d8" />,
-        <div style={{
-          background: 'rgba(0,0,0,0.2)',
-          border: '1px solid rgba(255,255,255,0.05)',
-          borderRadius: 8,
-          padding: '12px 14px',
-          fontFamily: 'monospace',
-          fontSize: '11px',
-          color: '#e0e0e0',
-          whiteSpace: 'pre-wrap',
-          lineHeight: '1.6'
-        }}>
-          {data.coaching}
+      {/* Coaching */}
+      {data?.coaching && (
+        <div style={{ padding: '12px 16px', background: 'var(--accent-subtle)', border: '1px solid var(--border-accent)', borderRadius: 12, marginBottom: 16, fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+          💡 {data.coaching}
         </div>
       )}
 
-      {/* Pattern History */}
-      {card('Detection History', <Clock size={15} color="#ffb74d" />,
-        history.length > 0 ? (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#90a4ae', textAlign: 'left' }}>
-                  <th style={{ padding: '8px 4px' }}>Time</th>
-                  <th style={{ padding: '8px 4px' }}>Signal</th>
-                  <th style={{ padding: '8px 4px', textAlign: 'right' }}>Score</th>
-                  <th style={{ padding: '8px 4px' }}>Detected Patterns</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map((h, idx) => {
-                  const sigColor = h.pattern_signal === 'bullish' ? '#69f0ae' : h.pattern_signal === 'bearish' ? '#ff5252' : '#90a4ae';
-                  const timestampStr = h.timestamp 
-                    ? new Date(h.timestamp).toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', day: '2-digit', month: 'short' })
-                    : '—';
-                  const pats = h.patterns_detected || [];
-                  
-                  return (
-                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                      <td style={{ padding: '8px 4px', color: '#666' }}>{timestampStr}</td>
-                      <td style={{ padding: '8px 4px', color: sigColor, fontWeight: 600 }}>{h.pattern_signal?.toUpperCase()}</td>
-                      <td style={{ padding: '8px 4px', textAlign: 'right', fontWeight: 600 }}>{h.pattern_score > 0 ? '+' : ''}{h.pattern_score}</td>
-                      <td style={{ padding: '8px 4px', color: '#b0bec5' }}>
-                        {pats.length > 0 ? pats.map(p => p.name).join(', ') : 'None'}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+      {/* No patterns */}
+      {patterns.length === 0 && (
+        <div className="no-data">No significant candlestick patterns detected for {symbol} today.</div>
+      )}
+
+      {/* Bullish section */}
+      {bullish.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--bullish)', marginBottom: 8 }}>
+            ▲ Bullish Patterns ({bullish.length})
           </div>
-        ) : (
-          <div style={{ textAlign: 'center', padding: '16px 0', color: '#666', fontSize: 13 }}>
-            No history recorded yet for {symbol}. Try clicking refresh above.
+          {bullish.map((p, i) => <PatternCard key={i} pattern={p} />)}
+        </div>
+      )}
+
+      {/* Bearish section */}
+      {bearish.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--bearish)', marginBottom: 8 }}>
+            ▼ Bearish Patterns ({bearish.length})
           </div>
-        )
+          {bearish.map((p, i) => <PatternCard key={i} pattern={p} />)}
+        </div>
+      )}
+
+      {/* Neutral section */}
+      {neutral.length > 0 && (
+        <div>
+          <div style={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-muted)', marginBottom: 8 }}>
+            — Neutral Patterns ({neutral.length})
+          </div>
+          {neutral.map((p, i) => <PatternCard key={i} pattern={p} />)}
+        </div>
       )}
     </div>
   );

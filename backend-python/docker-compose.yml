@@ -36,7 +36,7 @@ services:
     ports:
       - "8000:8000"
     env_file:
-      - .env
+      - ../.env
     environment:
       # Proxmox PostgreSQL — update IP in .env
       - DATABASE_URL=${DATABASE_URL}
